@@ -2,8 +2,13 @@
 name = "clidex"
 version = "0.1.0"
 edition = "2021"
-description = "CLI tool discovery for AI agents"
+description = "CLI tool discovery for AI agents — search, compare, and install 440+ command-line tools with structured YAML/JSON output"
 license = "MIT"
+repository = "https://github.com/syshin0116/clidex"
+homepage = "https://github.com/syshin0116/clidex"
+readme = "README.md"
+keywords = ["cli", "search", "ai-agent", "developer-tools", "bm25"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
