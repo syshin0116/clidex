@@ -1,0 +1,26 @@
+[package]
+name = "clidex"
+version = "0.1.0"
+edition = "2021"
+description = "CLI tool discovery for AI agents"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+tokio = { version = "1", features = ["full"] }
+colored = "2"
+fuzzy-matcher = "0.3"
+bm25 = "1"
+dirs = "5"
+regex = "1"
+
+[dev-dependencies]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

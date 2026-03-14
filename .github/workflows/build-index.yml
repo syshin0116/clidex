@@ -1,0 +1,52 @@
+name: Build Index
+
+on:
+  schedule:
+    # Every Monday at 6am UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build index builder
+        run: cargo build --release --bin build_index
+
+      - name: Build index
+        run: ./target/release/build_index index.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_LIMIT: 500
+          CRATES_LIMIT: 500
+          NPM_LIMIT: 100
+          LLMS_LIMIT: 200
+
+      - name: Upload index as release asset
+        run: |
+          # Create or update the "index" release
+          gh release delete index --yes 2>/dev/null || true
+          gh release create index \
+            --title "Latest Index" \
+            --notes "Auto-generated CLI tool index. Updated weekly." \
+            --latest=false \
+            index.yaml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
