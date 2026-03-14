@@ -54,10 +54,21 @@ curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh |
 
 Auto-detects your platform (linux/mac, x86/arm) and installs to `~/.local/bin`.
 
-### From source
+### Windows
+
+Download the latest `.zip` from [Releases](https://github.com/syshin0116/clidex/releases/latest), extract `clidex.exe`, and add it to your PATH.
+
+Or with PowerShell:
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/syshin0116/clidex/releases/latest/download/clidex-x86_64-pc-windows-msvc.zip" -OutFile clidex.zip
+Expand-Archive clidex.zip -DestinationPath "$env:USERPROFILE\.local\bin"
+```
+
+### From source (all platforms)
 
 ```bash
-cargo install --git https://github.com/syshin0116/clidex.git
+cargo install clidex
 ```
 
 ### Setup
