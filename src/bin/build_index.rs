@@ -967,12 +967,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 1b: Fetch toolleeo/cli-apps
     eprintln!("Fetching toolleeo/cli-apps...");
-    let toolleeo_apps = client
-        .get(TOOLLEEO_APPS_URL)
-        .send()
-        .await?
-        .text()
-        .await?;
+    let toolleeo_apps = client.get(TOOLLEEO_APPS_URL).send().await?.text().await?;
     let toolleeo_cats = client
         .get(TOOLLEEO_CATEGORIES_URL)
         .send()
@@ -986,7 +981,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut toolleeo_tools = parse_toolleeo_csv(&toolleeo_apps, &toolleeo_cats);
-    eprintln!("Parsed {} tools from toolleeo/cli-apps", toolleeo_tools.len());
+    eprintln!(
+        "Parsed {} tools from toolleeo/cli-apps",
+        toolleeo_tools.len()
+    );
 
     let toolleeo_limit: Option<usize> = std::env::var("TOOLLEEO_LIMIT")
         .ok()
