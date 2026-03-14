@@ -10,11 +10,11 @@ struct Cli {
     /// Search query (e.g. "csv to json")
     query: Option<String>,
 
-    /// Output as pretty-printed table (human-friendly)
+    /// Output as pretty-printed table (human-friendly). Default: YAML
     #[arg(long)]
     pretty: bool,
 
-    /// Output as JSON (default is YAML)
+    /// Output as JSON. Default: YAML
     #[arg(long)]
     json: bool,
 
@@ -40,10 +40,10 @@ enum Commands {
     Info {
         /// Tool name
         name: String,
-        /// Output as pretty-printed (human-friendly)
+        /// Output as pretty-printed table (human-friendly). Default: YAML
         #[arg(long)]
         pretty: bool,
-        /// Output as JSON (default is YAML)
+        /// Output as JSON. Default: YAML
         #[arg(long)]
         json: bool,
     },
@@ -55,10 +55,10 @@ enum Commands {
     Compare {
         /// Tool names to compare
         names: Vec<String>,
-        /// Output as pretty-printed (human-friendly)
+        /// Output as pretty-printed table (human-friendly). Default: YAML
         #[arg(long)]
         pretty: bool,
-        /// Output as JSON (default is YAML)
+        /// Output as JSON. Default: YAML
         #[arg(long)]
         json: bool,
     },
@@ -70,10 +70,10 @@ enum Commands {
         /// Maximum number of results
         #[arg(short = 'n', long, default_value_t = 20)]
         max_results: usize,
-        /// Output as pretty-printed (human-friendly)
+        /// Output as pretty-printed table (human-friendly). Default: YAML
         #[arg(long)]
         pretty: bool,
-        /// Output as JSON (default is YAML)
+        /// Output as JSON. Default: YAML
         #[arg(long)]
         json: bool,
     },

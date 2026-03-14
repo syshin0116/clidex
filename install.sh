@@ -4,7 +4,18 @@ set -e
 # clidex installer — downloads the latest release binary for your platform
 
 REPO="syshin0116/clidex"
-INSTALL_DIR="${CLIDEX_INSTALL_DIR:-$HOME/.local/bin}"
+
+# Choose install directory:
+# 1. User override via env var
+# 2. ~/.cargo/bin if it exists (avoid conflict with cargo install)
+# 3. ~/.local/bin as default
+if [ -n "$CLIDEX_INSTALL_DIR" ]; then
+  INSTALL_DIR="$CLIDEX_INSTALL_DIR"
+elif [ -d "$HOME/.cargo/bin" ]; then
+  INSTALL_DIR="$HOME/.cargo/bin"
+else
+  INSTALL_DIR="$HOME/.local/bin"
+fi
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -47,6 +58,15 @@ chmod +x "$INSTALL_DIR/clidex"
 
 echo ""
 echo "Installed clidex to: $INSTALL_DIR/clidex"
+
+# Warn if another clidex binary exists elsewhere in PATH
+OTHER_CLIDEX=$(which clidex 2>/dev/null || true)
+if [ -n "$OTHER_CLIDEX" ] && [ "$OTHER_CLIDEX" != "$INSTALL_DIR/clidex" ]; then
+  echo ""
+  echo "Warning: another clidex found at $OTHER_CLIDEX"
+  echo "  This may shadow the newly installed version."
+  echo "  Remove it with: rm $OTHER_CLIDEX"
+fi
 
 # Check if install dir is in PATH
 case ":$PATH:" in

@@ -1,16 +1,17 @@
 <p align="center">
-  <h1 align="center">Clidex</h1>
-  <p align="center">
-    <strong>CLI tool discovery for AI agents</strong>
-  </p>
-  <p align="center">
-    Search, compare, and install 440+ command-line tools with structured YAML/JSON output.
-  </p>
-  <p align="center">
-    <a href="https://github.com/syshin0116/clidex/actions/workflows/ci.yml"><img src="https://github.com/syshin0116/clidex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-    <a href="https://github.com/syshin0116/clidex/releases/latest"><img src="https://img.shields.io/github/v/release/syshin0116/clidex" alt="Release"></a>
-    <a href="https://github.com/syshin0116/clidex/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-  </p>
+  <img src="assets/logo.svg" alt="Clidex" width="500">
+</p>
+<p align="center">
+  <strong>CLI tool discovery for AI agents</strong>
+</p>
+<p align="center">
+  Search, compare, and install 440+ command-line tools with structured YAML/JSON output.
+</p>
+<p align="center">
+  <a href="https://github.com/syshin0116/clidex/actions/workflows/ci.yml"><img src="https://github.com/syshin0116/clidex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/syshin0116/clidex/releases/latest"><img src="https://img.shields.io/github/v/release/syshin0116/clidex" alt="Release"></a>
+  <a href="https://crates.io/crates/clidex"><img src="https://img.shields.io/crates/v/clidex" alt="crates.io"></a>
+  <a href="https://github.com/syshin0116/clidex/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
 
 ---
@@ -21,15 +22,9 @@ AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands — 
 
 **Clidex bridges this gap.** It's a local CLI that returns structured metadata about CLI tools: what they do, how to install them, and where to find docs. No web search API calls, no HTML parsing, no cost — just a fast local lookup.
 
-```
-Agent: "I need to convert CSV to JSON"
-  ↓
-$ clidex "csv to json"
-  ↓
-Returns YAML: jq, miller, q — with `brew install` / `cargo install` commands
-  ↓
-Agent installs and uses the tool
-```
+<p align="center">
+  <img src="assets/demo.svg" alt="clidex demo" width="600">
+</p>
 
 ### What makes it different
 
@@ -151,15 +146,19 @@ clidex update                      # Download latest index
 clidex stats                       # Show index statistics
 ```
 
-### Common flags
+### Output formats
+
+| Flag | Format | Description |
+|------|--------|-------------|
+| *(none)* | YAML | **Default.** Structured, agent-friendly |
+| `--pretty` | Pretty | Human-friendly table |
+| `--json` | JSON | Machine-parseable JSON |
+
+### Other flags
 
 | Flag | Description |
 |------|-------------|
-| `--pretty` | Human-friendly pretty-printed output |
-| `--json` | JSON output |
 | `-n <N>` | Max number of results (default: 10) |
-
-Default output format is **YAML** — optimized for agent consumption.
 
 ---
 

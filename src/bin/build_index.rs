@@ -6,6 +6,10 @@ use std::collections::{BTreeMap, HashMap};
 const AWESOME_CLI_APPS_URL: &str =
     "https://raw.githubusercontent.com/agarrharr/awesome-cli-apps/master/readme.md";
 const HOMEBREW_FORMULA_URL: &str = "https://formulae.brew.sh/api/formula.json";
+const TOOLLEEO_APPS_URL: &str =
+    "https://raw.githubusercontent.com/toolleeo/cli-apps/master/data/apps.csv";
+const TOOLLEEO_CATEGORIES_URL: &str =
+    "https://raw.githubusercontent.com/toolleeo/cli-apps/master/data/categories.csv";
 
 #[derive(Debug, Deserialize)]
 struct BrewFormula {
@@ -132,6 +136,120 @@ fn parse_awesome_cli_apps(markdown: &str) -> Vec<Tool> {
                 last_updated: None,
             });
         }
+    }
+
+    tools
+}
+
+/// Parse a single CSV line handling quoted fields
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                // Check for escaped quote (double quote)
+                if chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                current.push(c);
+            }
+        } else if c == '"' {
+            in_quotes = true;
+        } else if c == ',' {
+            fields.push(current.trim().to_string());
+            current = String::new();
+        } else {
+            current.push(c);
+        }
+    }
+    fields.push(current.trim().to_string());
+    fields
+}
+
+/// Parse toolleeo/cli-apps CSV data into tools
+fn parse_toolleeo_csv(apps_csv: &str, categories_csv: &str) -> Vec<Tool> {
+    // Build label → name mapping from categories CSV
+    let mut category_map: HashMap<String, String> = HashMap::new();
+    for line in categories_csv.lines().skip(1) {
+        let fields = parse_csv_line(line);
+        if fields.len() >= 2 {
+            let label = fields[0].clone();
+            let name = fields[1].clone();
+            if !label.is_empty() && !name.is_empty() {
+                category_map.insert(label, name);
+            }
+        }
+    }
+
+    let mut tools = Vec::new();
+
+    for line in apps_csv.lines().skip(1) {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let fields = parse_csv_line(line);
+        // columns: category,name,homepage,git,description
+        if fields.len() < 5 {
+            continue;
+        }
+
+        let cat_label = &fields[0];
+        let name = &fields[1];
+        let homepage = &fields[2];
+        let git = &fields[3];
+        let desc = &fields[4];
+
+        if name.is_empty() {
+            continue;
+        }
+
+        let category = category_map
+            .get(cat_label.as_str())
+            .cloned()
+            .unwrap_or_else(|| cat_label.clone());
+
+        let repo = if git.starts_with("https://github.com/") {
+            Some(git.clone())
+        } else {
+            None
+        };
+
+        let tool_homepage = if !homepage.is_empty() && !homepage.starts_with("https://github.com/")
+        {
+            Some(homepage.clone())
+        } else {
+            None
+        };
+
+        let tags = generate_tags(name, desc, &category);
+
+        tools.push(Tool {
+            name: name.clone(),
+            binary: None,
+            desc: desc.clone(),
+            category,
+            tags,
+            install: BTreeMap::new(),
+            stars: None,
+            brew_installs_30d: None,
+            links: Links {
+                repo,
+                homepage: tool_homepage,
+                docs: None,
+                llms_txt: None,
+            },
+            last_updated: None,
+        });
     }
 
     tools
@@ -846,6 +964,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut tools = parse_awesome_cli_apps(&awesome_md);
     eprintln!("Parsed {} tools from awesome-cli-apps", tools.len());
+
+    // Step 1b: Fetch toolleeo/cli-apps
+    eprintln!("Fetching toolleeo/cli-apps...");
+    let toolleeo_apps = client
+        .get(TOOLLEEO_APPS_URL)
+        .send()
+        .await?
+        .text()
+        .await?;
+    let toolleeo_cats = client
+        .get(TOOLLEEO_CATEGORIES_URL)
+        .send()
+        .await?
+        .text()
+        .await?;
+    eprintln!(
+        "Fetched toolleeo: {} bytes apps, {} bytes categories",
+        toolleeo_apps.len(),
+        toolleeo_cats.len()
+    );
+
+    let mut toolleeo_tools = parse_toolleeo_csv(&toolleeo_apps, &toolleeo_cats);
+    eprintln!("Parsed {} tools from toolleeo/cli-apps", toolleeo_tools.len());
+
+    let toolleeo_limit: Option<usize> = std::env::var("TOOLLEEO_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    if let Some(limit) = toolleeo_limit {
+        toolleeo_tools.truncate(limit);
+        eprintln!("Capped toolleeo tools to {} (TOOLLEEO_LIMIT)", limit);
+    }
+
+    // Merge: only add tools not already present (case-insensitive)
+    let existing_names: std::collections::HashSet<String> =
+        tools.iter().map(|t| t.name.to_lowercase()).collect();
+    let mut toolleeo_added = 0;
+    for tool in toolleeo_tools {
+        if !existing_names.contains(&tool.name.to_lowercase()) {
+            tools.push(tool);
+            toolleeo_added += 1;
+        }
+    }
+    eprintln!("Added {} new tools from toolleeo/cli-apps", toolleeo_added);
 
     // Step 2: Fetch Homebrew data + enrich + add missing CLI tools
     eprintln!("Fetching Homebrew formula data...");

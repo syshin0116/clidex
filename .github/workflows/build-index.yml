@@ -2,8 +2,8 @@ name: Build Index
 
 on:
   schedule:
-    # Every Monday at 6am UTC
-    - cron: '0 6 * * 1'
+    # Every day at 6am UTC
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 permissions:
@@ -34,10 +34,11 @@ jobs:
         run: ./target/release/build_index index.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_LIMIT: 500
-          CRATES_LIMIT: 500
-          NPM_LIMIT: 100
-          LLMS_LIMIT: 200
+          GITHUB_LIMIT: 5000
+          CRATES_LIMIT: 1000
+          NPM_LIMIT: 500
+          LLMS_LIMIT: 500
+          TOOLLEEO_LIMIT: 0
 
       - name: Upload index as release asset
         run: |
@@ -45,7 +46,7 @@ jobs:
           gh release delete index --yes 2>/dev/null || true
           gh release create index \
             --title "Latest Index" \
-            --notes "Auto-generated CLI tool index. Updated weekly." \
+            --notes "Auto-generated CLI tool index. Updated daily." \
             --latest=false \
             index.yaml
         env:
