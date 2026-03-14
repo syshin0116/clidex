@@ -29,8 +29,10 @@
   <!-- clidex -->
   <text x="100" y="86" font-family="'JetBrains Mono','Fira Code','SF Mono','Courier New',monospace" font-size="58" font-weight="800" letter-spacing="4" text-anchor="start" dominant-baseline="central" style="fill:rgb(241, 241, 241);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;JetBrains Mono&quot;, &quot;Fira Code&quot;, &quot;SF Mono&quot;, &quot;Courier New&quot;, monospace;font-size:58px;font-weight:800;text-anchor:start;dominant-baseline:central">clidex</text>
 
-  <!-- Block cursor -->
-  <rect x="364" y="66" width="30" height="42" rx="2" opacity="0.85" style="fill:rgb(241, 241, 241);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;Anthropic Sans&quot;, -apple-system, &quot;system-ui&quot;, &quot;Segoe UI&quot;, sans-serif;font-size:16px;font-weight:400;text-anchor:start;dominant-baseline:auto"/>
+  <!-- Block cursor (blinking) -->
+  <rect x="364" y="66" width="30" height="42" rx="2" style="fill:rgb(241, 241, 241);stroke:none">
+    <animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.5;0.5;1" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
 
   <!-- Tagline: 220 (between 212 and 232) -->
   <text x="220" y="132" text-anchor="middle" font-family="'JetBrains Mono','Fira Code','SF Mono',monospace" font-size="12" letter-spacing="3" style="fill:rgb(102, 102, 102);stroke:none;color:rgb(0, 0, 0);stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;opacity:1;font-family:&quot;JetBrains Mono&quot;, &quot;Fira Code&quot;, &quot;SF Mono&quot;, monospace;font-size:12px;font-weight:400;text-anchor:middle;dominant-baseline:auto">CLI SEARCH &amp; INDEXER</text>
