@@ -10,11 +10,11 @@ struct Cli {
     /// Search query (e.g. "csv to json")
     query: Option<String>,
 
-    /// Output as YAML (recommended for agents)
+    /// Output as pretty-printed table (human-friendly)
     #[arg(long)]
-    yaml: bool,
+    pretty: bool,
 
-    /// Output as JSON
+    /// Output as JSON (default is YAML)
     #[arg(long)]
     json: bool,
 
@@ -40,10 +40,10 @@ enum Commands {
     Info {
         /// Tool name
         name: String,
-        /// Output as YAML
+        /// Output as pretty-printed (human-friendly)
         #[arg(long)]
-        yaml: bool,
-        /// Output as JSON
+        pretty: bool,
+        /// Output as JSON (default is YAML)
         #[arg(long)]
         json: bool,
     },
@@ -55,10 +55,10 @@ enum Commands {
     Compare {
         /// Tool names to compare
         names: Vec<String>,
-        /// Output as YAML
+        /// Output as pretty-printed (human-friendly)
         #[arg(long)]
-        yaml: bool,
-        /// Output as JSON
+        pretty: bool,
+        /// Output as JSON (default is YAML)
         #[arg(long)]
         json: bool,
     },
@@ -70,22 +70,22 @@ enum Commands {
         /// Maximum number of results
         #[arg(short = 'n', long, default_value_t = 20)]
         max_results: usize,
-        /// Output as YAML
+        /// Output as pretty-printed (human-friendly)
         #[arg(long)]
-        yaml: bool,
-        /// Output as JSON
+        pretty: bool,
+        /// Output as JSON (default is YAML)
         #[arg(long)]
         json: bool,
     },
 }
 
-fn get_format(yaml: bool, json: bool) -> Format {
-    if yaml {
-        Format::Yaml
+fn get_format(pretty: bool, json: bool) -> Format {
+    if pretty {
+        Format::Pretty
     } else if json {
         Format::Json
     } else {
-        Format::Pretty
+        Format::Yaml
     }
 }
 
@@ -128,10 +128,10 @@ async fn main() {
                 println!("With llms.txt: {}", stats.with_llms_txt);
                 return;
             }
-            Commands::Info { name, yaml, json } => {
+            Commands::Info { name, pretty, json } => {
                 let idx = load_or_exit();
                 match search::find_tool(&idx.tools, &name) {
-                    Some(tool) => output::print_tool_detail(&tool, get_format(yaml, json)),
+                    Some(tool) => output::print_tool_detail(&tool, get_format(pretty, json)),
                     None => {
                         eprintln!("Tool not found: {name}");
                         std::process::exit(1);
@@ -139,7 +139,11 @@ async fn main() {
                 }
                 return;
             }
-            Commands::Compare { names, yaml, json } => {
+            Commands::Compare {
+                names,
+                pretty,
+                json,
+            } => {
                 let idx = load_or_exit();
                 let tools: Vec<_> = names
                     .iter()
@@ -163,13 +167,13 @@ async fn main() {
                             .join(", ")
                     );
                 }
-                output::print_compare(&tools, get_format(yaml, json));
+                output::print_compare(&tools, get_format(pretty, json));
                 return;
             }
             Commands::Trending {
                 category,
                 max_results,
-                yaml,
+                pretty,
                 json,
             } => {
                 let idx = load_or_exit();
@@ -187,7 +191,7 @@ async fn main() {
                     eprintln!("No trending tools found (need stars data — run build_index with GITHUB_TOKEN)");
                     std::process::exit(1);
                 }
-                output::print_tools(&tools, get_format(yaml, json));
+                output::print_tools(&tools, get_format(pretty, json));
                 return;
             }
         }
@@ -197,7 +201,7 @@ async fn main() {
     if cli.categories {
         let idx = load_or_exit();
         let cats = search::get_categories(&idx.tools);
-        output::print_categories(&cats, get_format(cli.yaml, cli.json));
+        output::print_categories(&cats, get_format(cli.pretty, cli.json));
         return;
     }
 
@@ -210,7 +214,7 @@ async fn main() {
             eprintln!("No tools found in category: {category}");
             std::process::exit(1);
         }
-        output::print_tools(&tools, get_format(cli.yaml, cli.json));
+        output::print_tools(&tools, get_format(cli.pretty, cli.json));
         return;
     }
 
@@ -223,7 +227,7 @@ async fn main() {
             std::process::exit(1);
         }
         let tools: Vec<_> = results.into_iter().map(|r| r.tool).collect();
-        output::print_tools(&tools, get_format(cli.yaml, cli.json));
+        output::print_tools(&tools, get_format(cli.pretty, cli.json));
         return;
     }
 

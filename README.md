@@ -24,9 +24,9 @@ AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands — 
 ```
 Agent: "I need to convert CSV to JSON"
   ↓
-$ clidex "csv to json" --yaml
+$ clidex "csv to json"
   ↓
-Returns: jq, miller, q — with `brew install` / `cargo install` commands
+Returns YAML: jq, miller, q — with `brew install` / `cargo install` commands
   ↓
 Agent installs and uses the tool
 ```
@@ -39,7 +39,7 @@ Agent installs and uses the tool
 | Output | Markdown / TUI | YAML / JSON / Pretty |
 | Install info | Links only | `brew install jq` — ready to run |
 | Docs access | Click a link | `llms.txt` URL for agents to read |
-| Pipeline | No | `clidex ... --yaml \| next_tool` |
+| Pipeline | No | `clidex ... \| next_tool` (YAML by default) |
 | Compare | No | `clidex compare jq dasel yq` |
 
 ---
@@ -75,13 +75,13 @@ clidex update    # Downloads ~/.clidex/index.yaml
 ### Search
 
 ```bash
-clidex "csv to json"              # Pretty output (human-friendly)
-clidex "csv to json" --yaml       # YAML output (agent-friendly)
+clidex "csv to json"              # YAML output (default, agent-friendly)
+clidex "csv to json" --pretty     # Pretty-printed table (human-friendly)
 clidex "csv to json" --json       # JSON output
 clidex "file manager" -n 3        # Limit to top 3 results
 ```
 
-Example YAML output:
+Default output (YAML):
 
 ```yaml
 - name: jq
@@ -98,15 +98,15 @@ Example YAML output:
 ### Tool info
 
 ```bash
-clidex info ripgrep               # Detailed metadata for a single tool
-clidex info ripgrep --yaml        # Structured output
+clidex info ripgrep               # YAML output (default)
+clidex info ripgrep --pretty      # Human-friendly output
 ```
 
 ### Compare tools
 
 ```bash
-clidex compare jq dasel yq        # Side-by-side comparison
-clidex compare jq dasel yq --yaml
+clidex compare jq dasel yq           # YAML output (default)
+clidex compare jq dasel yq --pretty  # Side-by-side table
 ```
 
 ```
@@ -145,9 +145,11 @@ clidex stats                       # Show index statistics
 
 | Flag | Description |
 |------|-------------|
-| `--yaml` | YAML output (recommended for agents) |
+| `--pretty` | Human-friendly pretty-printed output |
 | `--json` | JSON output |
 | `-n <N>` | Max number of results (default: 10) |
+
+Default output format is **YAML** — optimized for agent consumption.
 
 ---
 
@@ -155,7 +157,7 @@ clidex stats                       # Show index statistics
 
 clidex is built for AI agents to consume programmatically. The typical workflow:
 
-1. Agent runs `clidex "task description" --yaml`
+1. Agent runs `clidex "task description"` (YAML by default)
 2. Parses the structured result
 3. Extracts `install.brew` or `install.cargo` command
 4. Installs and uses the tool
