@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="Clidex" width="500">
+  <img src="assets/logo.gif" alt="Clidex" width="500">
 </p>
 <p align="center">
   <strong>CLI tool discovery for AI agents</strong>
@@ -23,7 +23,7 @@ AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands — 
 **Clidex bridges this gap.** It's a local CLI that returns structured metadata about CLI tools: what they do, how to install them, and where to find docs. No web search API calls, no HTML parsing, no cost — just a fast local lookup.
 
 <p align="center">
-  <img src="assets/demo.svg" alt="clidex demo" width="600">
+  <img src="assets/demo.gif" alt="clidex demo" width="600">
 </p>
 
 ### What makes it different
