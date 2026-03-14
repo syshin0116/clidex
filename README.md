@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">clidex</h1>
+  <h1 align="center">Clidex</h1>
   <p align="center">
     <strong>CLI tool discovery for AI agents</strong>
   </p>
@@ -15,11 +15,11 @@
 
 ---
 
-## Why clidex?
+## Why Clidex?
 
 AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands — but they don't know which tools exist beyond the basics. An agent uses `grep` when `ripgrep` is 10x faster, or `find` when `fd` is simpler.
 
-**clidex bridges this gap.** It's a local CLI that returns structured metadata about CLI tools: what they do, how to install them, and where to find docs. No web search API calls, no HTML parsing, no cost — just a fast local lookup.
+**Clidex bridges this gap.** It's a local CLI that returns structured metadata about CLI tools: what they do, how to install them, and where to find docs. No web search API calls, no HTML parsing, no cost — just a fast local lookup.
 
 ```
 Agent: "I need to convert CSV to JSON"
@@ -33,7 +33,7 @@ Agent installs and uses the tool
 
 ### What makes it different
 
-| | awesome-cli-apps / cli-anything | clidex |
+| | awesome-cli-apps / cli-anything | Clidex |
 |--|------|------|
 | Target user | Humans | AI agents (+ humans) |
 | Output | Markdown / TUI | YAML / JSON / Pretty |
@@ -46,15 +46,21 @@ Agent installs and uses the tool
 
 ## Installation
 
-### Quick install (Linux / macOS)
+### With Cargo (all platforms)
+
+```bash
+cargo install clidex
+```
+
+### Pre-built binaries
+
+**Linux / macOS:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
 ```
 
-Auto-detects your platform (linux/mac, x86/arm) and installs to `~/.local/bin`.
-
-### Windows
+**Windows:**
 
 ```bash
 curl -fsSL -o clidex.zip https://github.com/syshin0116/clidex/releases/latest/download/clidex-x86_64-pc-windows-msvc.zip
@@ -62,13 +68,7 @@ tar -xf clidex.zip
 move clidex.exe %USERPROFILE%\.local\bin\
 ```
 
-Or download the `.zip` from [Releases](https://github.com/syshin0116/clidex/releases/latest) and add `clidex.exe` to your PATH.
-
-### From source (all platforms)
-
-```bash
-cargo install clidex
-```
+Or download directly from [Releases](https://github.com/syshin0116/clidex/releases/latest).
 
 ### Setup
 
@@ -165,7 +165,7 @@ Default output format is **YAML** — optimized for agent consumption.
 
 ## Agent integration
 
-clidex is built for AI agents to consume programmatically. The typical workflow:
+Clidex is built for AI agents to consume programmatically. The typical workflow:
 
 1. Agent runs `clidex "task description"` (YAML by default)
 2. Parses the structured result
@@ -200,7 +200,7 @@ The `llms_txt` field is especially useful — it points to [llms.txt](https://ll
 
 ## How search works
 
-clidex uses **BM25** text search with domain-specific optimizations:
+Clidex uses **BM25** text search with domain-specific optimizations:
 
 - **Field weighting**: Tool name (3x) > tags + category (2x) > description (1x)
 - **Synonym expansion**: `grep` → also matches `search`, `find`, `ripgrep`, `rg`
