@@ -1,0 +1,92 @@
+# Clidex
+
+> CLI tool discovery for AI agents. Search, compare, and install 440+ command-line tools with structured YAML/JSON output.
+
+## Installation
+
+```bash
+cargo install clidex
+# or
+curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
+```
+
+After installing, download the tool index:
+
+```bash
+clidex update
+```
+
+## Commands
+
+### Search (default command)
+
+```bash
+clidex "csv to json"              # YAML output (default)
+clidex "file manager" -n 3        # Limit results
+```
+
+### Tool info
+
+```bash
+clidex info ripgrep
+```
+
+### Compare tools
+
+```bash
+clidex compare jq dasel yq
+```
+
+### Trending
+
+```bash
+clidex trending                   # Top tools by GitHub stars
+clidex trending -n 10
+clidex trending --category git
+```
+
+### Categories
+
+```bash
+clidex --categories               # List all categories with tool counts
+clidex --category docker          # All tools in a category
+```
+
+### Update index
+
+```bash
+clidex update                     # Download latest index
+```
+
+## Output Formats
+
+- *(default)*: YAML — structured, agent-friendly
+- `--pretty`: Human-friendly table
+- `--json`: Machine-parseable JSON
+
+## Output Schema
+
+Each tool in the result contains:
+
+```yaml
+name: string            # Tool name
+binary: string?         # Binary name (if different from name)
+desc: string            # One-line description
+category: string        # Category path (e.g. "Files and Directories > Search")
+tags: [string]          # Search tags
+install:                # Install commands by package manager
+  brew: string?
+  cargo: string?
+  npm: string?
+stars: number?          # GitHub stars
+links:
+  repo: string?         # GitHub repository
+  homepage: string?     # Project homepage
+  docs: string?         # Documentation URL
+  llms_txt: string?     # llms.txt URL (LLM-readable docs)
+```
+
+## Links
+
+- Repo: <https://github.com/syshin0116/clidex>
+- Crates.io: <https://crates.io/crates/clidex>

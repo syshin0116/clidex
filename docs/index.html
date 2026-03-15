@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Clidex — CLI Tool Discovery for AI Agents</title>
+  <meta name="description" content="Search, compare, and install 440+ command-line tools with structured YAML/JSON output. Built for AI agents like Claude Code, Codex, and Gemini CLI.">
+  <meta name="keywords" content="clidex, CLI, command-line tools, AI agents, Claude Code, Codex, Gemini CLI, tool discovery, Rust, cargo">
+  <link rel="canonical" href="https://syshin0116.github.io/clidex/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Clidex — CLI Tool Discovery for AI Agents">
+  <meta property="og:description" content="Search, compare, and install 440+ command-line tools with structured YAML/JSON output. Built for AI agents like Claude Code, Codex, and Gemini CLI.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/syshin0116/clidex/main/assets/logo.svg">
+  <meta property="og:url" content="https://syshin0116.github.io/clidex/">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Clidex — CLI Tool Discovery for AI Agents">
+  <meta name="twitter:description" content="Search, compare, and install 440+ command-line tools with structured YAML/JSON output. Built for AI agents like Claude Code, Codex, and Gemini CLI.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/syshin0116/clidex/main/assets/logo.svg">
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    a {
+      color: #58a6ff;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem;
+    }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .logo {
+      max-width: 280px;
+      width: 100%;
+      margin-bottom: 1rem;
+    }
+
+    .tagline {
+      font-size: 1.25rem;
+      color: #8b949e;
+      margin-bottom: 2rem;
+    }
+
+    /* Demo */
+    .demo {
+      margin-bottom: 3rem;
+      text-align: center;
+    }
+
+    .demo img {
+      max-width: 100%;
+      border-radius: 8px;
+      border: 1px solid #30363d;
+    }
+
+    /* Code blocks */
+    .section {
+      margin-bottom: 2.5rem;
+    }
+
+    .section h2 {
+      font-size: 1.1rem;
+      color: #f0f6fc;
+      margin-bottom: 0.75rem;
+      font-weight: 600;
+    }
+
+    pre {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+      color: #e6edf3;
+    }
+
+    pre .prompt {
+      color: #7ee787;
+      user-select: none;
+    }
+
+    pre .comment {
+      color: #8b949e;
+    }
+
+    /* Links section */
+    .links {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 3rem;
+      padding-top: 2rem;
+      border-top: 1px solid #21262d;
+    }
+
+    .links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 1rem;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      font-size: 0.9rem;
+      transition: border-color 0.2s;
+    }
+
+    .links a:hover {
+      border-color: #58a6ff;
+      text-decoration: none;
+    }
+
+    .links a svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #21262d;
+      color: #484f58;
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 480px) {
+      .container {
+        padding: 2rem 1rem;
+      }
+
+      .tagline {
+        font-size: 1.05rem;
+      }
+
+      pre {
+        font-size: 0.8rem;
+        padding: 0.75rem 1rem;
+      }
+
+      .links {
+        gap: 0.75rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="hero">
+      <img class="logo" src="https://raw.githubusercontent.com/syshin0116/clidex/main/assets/logo.gif" alt="clidex logo">
+      <p class="tagline">CLI Tool Discovery for AI Agents</p>
+    </div>
+
+    <div class="demo">
+      <img src="https://raw.githubusercontent.com/syshin0116/clidex/main/assets/demo.gif" alt="clidex demo — searching for CLI tools">
+    </div>
+
+    <div class="section">
+      <h2>Install</h2>
+      <pre><span class="prompt">$ </span>cargo install clidex</pre>
+    </div>
+
+    <div class="section">
+      <h2>Quick Start</h2>
+      <pre><span class="comment"># Update the tool index</span>
+<span class="prompt">$ </span>clidex update
+
+<span class="comment"># Search for tools</span>
+<span class="prompt">$ </span>clidex "csv to json"</pre>
+    </div>
+
+    <div class="links">
+      <a href="https://github.com/syshin0116/clidex" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+      <a href="https://crates.io/crates/clidex" target="_blank" rel="noopener">
+        <svg viewBox="0 0 512 512"><path d="M239.1 6.3l-208 78c-18.7 7-31.1 25-31.1 45v225.1c0 18.2 10.3 34.8 26.5 42.9l208 104c13.5 6.8 29.4 6.8 42.9 0l208-104c16.3-8.1 26.5-24.8 26.5-42.9V129.3c0-20-12.4-37.9-31.1-44.9l-208-78C262 2.2 250 2.2 239.1 6.3zM256 68.4l192 72v1.1l-192 78-192-78v-1.1l192-72zm32 356V275.5l160-65v133.9l-160 80z"/></svg>
+        crates.io
+      </a>
+      <a href="https://syshin0116.github.io/blog/" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M0 1.75A.75.75 0 01.75 1h4.253c1.227 0 2.317.59 3 1.501A3.744 3.744 0 0111.006 1h4.245a.75.75 0 01.75.75v10.5a.75.75 0 01-.75.75h-4.507a2.25 2.25 0 00-1.591.659l-.622.621a.75.75 0 01-1.06 0l-.622-.621A2.25 2.25 0 005.258 13H.75a.75.75 0 01-.75-.75V1.75zm7.251 10.324V2.932A2.25 2.25 0 005.003 2.5H1.5v9h3.757a3.75 3.75 0 011.994.574zM8.755 12.074A3.75 3.75 0 0110.748 11.5H14.5v-9h-3.495a2.25 2.25 0 00-2.25 2.25v7.324z"/></svg>
+        Blog
+      </a>
+    </div>
+
+    <footer>
+      Built with Rust. MIT Licensed.
+    </footer>
+
+  </div>
+</body>
+</html>
