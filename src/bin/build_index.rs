@@ -554,80 +554,194 @@ fn parse_github_repo(url: &str) -> Option<(String, String)> {
     None
 }
 
-/// Enrich tools with GitHub stars
-async fn enrich_with_github(tools: &mut [Tool], client: &reqwest::Client, max_requests: usize) {
-    let token = std::env::var("GITHUB_TOKEN").ok();
-    let mut requests_made = 0;
+/// Load stars cache from previous index file
+fn load_stars_cache(path: &str) -> HashMap<String, (u64, Option<String>, Option<String>)> {
+    // Returns: name -> (stars, last_updated, homepage)
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return HashMap::new(),
+    };
+    let index: Index = match serde_yaml::from_str(&content) {
+        Ok(i) => i,
+        Err(_) => return HashMap::new(),
+    };
+    index
+        .tools
+        .into_iter()
+        .filter_map(|t| {
+            let stars = t.stars?;
+            Some((
+                t.name.to_lowercase(),
+                (stars, t.last_updated, t.links.homepage),
+            ))
+        })
+        .collect()
+}
 
+/// Check if a cached entry is fresh (within max_age_days)
+fn is_cache_fresh(last_updated: &Option<String>, max_age_days: u64) -> bool {
+    let updated = match last_updated {
+        Some(s) => s,
+        None => return false,
+    };
+    // Parse ISO 8601 date prefix (YYYY-MM-DD)
+    if updated.len() < 10 {
+        return false;
+    }
+    let now = chrono_now();
+    if now.len() < 10 {
+        return false;
+    }
+    // Simple day-based comparison using the date command
+    // If we can't parse, treat as stale
+    let updated_date = &updated[..10];
+    let now_date = &now[..10];
+    // Calculate approximate days difference
+    let days_diff = date_diff_days(updated_date, now_date);
+    days_diff < max_age_days as i64
+}
+
+fn date_diff_days(date_a: &str, date_b: &str) -> i64 {
+    // Simple YYYY-MM-DD diff. Parse to days since epoch (approximate).
+    fn to_days(d: &str) -> Option<i64> {
+        let parts: Vec<&str> = d.split('-').collect();
+        if parts.len() < 3 {
+            return None;
+        }
+        let y: i64 = parts[0].parse().ok()?;
+        let m: i64 = parts[1].parse().ok()?;
+        let d: i64 = parts[2].parse().ok()?;
+        Some(y * 365 + m * 30 + d)
+    }
+    match (to_days(date_a), to_days(date_b)) {
+        (Some(a), Some(b)) => (b - a).abs(),
+        _ => 999, // treat as stale if can't parse
+    }
+}
+
+/// Fetch GitHub stars for a single tool, returning updated fields
+async fn fetch_single_github(
+    owner: String,
+    repo: String,
+    token: Option<String>,
+    client: reqwest::Client,
+) -> Option<(u64, Option<String>, Option<String>)> {
+    let api_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
+    let mut req = client
+        .get(&api_url)
+        .header("User-Agent", "clidex-build/0.1")
+        .header("Accept", "application/vnd.github.v3+json");
+    if let Some(ref t) = token {
+        req = req.header("Authorization", format!("Bearer {}", t));
+    }
+
+    match req.send().await {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                let stars = json["stargazers_count"].as_u64();
+                let pushed = json["pushed_at"].as_str().map(String::from);
+                let homepage = json["homepage"].as_str().and_then(|hp| {
+                    if !hp.is_empty() && !hp.starts_with("https://github.com/") {
+                        Some(hp.to_string())
+                    } else {
+                        None
+                    }
+                });
+                return stars.map(|s| (s, pushed, homepage));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Enrich tools with GitHub stars — uses cache from previous index + parallel fetching
+async fn enrich_with_github(
+    tools: &mut [Tool],
+    client: &reqwest::Client,
+    max_requests: usize,
+    stars_cache: &HashMap<String, (u64, Option<String>, Option<String>)>,
+    cache_max_age_days: u64,
+) {
+    let token = std::env::var("GITHUB_TOKEN").ok();
+    let mut cached_hits = 0;
+
+    // Phase 1: Apply cache (3-day freshness)
     for tool in tools.iter_mut() {
-        if requests_made >= max_requests {
-            eprintln!(
-                "GitHub API: reached limit of {} requests, stopping",
-                max_requests
-            );
+        if tool.stars.is_some() {
+            continue;
+        }
+        let key = tool.name.to_lowercase();
+        if let Some((stars, last_updated, homepage)) = stars_cache.get(&key) {
+            if is_cache_fresh(last_updated, cache_max_age_days) {
+                tool.stars = Some(*stars);
+                if tool.last_updated.is_none() {
+                    tool.last_updated = last_updated.clone();
+                }
+                if tool.links.homepage.is_none() {
+                    tool.links.homepage = homepage.clone();
+                }
+                cached_hits += 1;
+            }
+        }
+    }
+    eprintln!(
+        "GitHub stars: {} from cache ({}d fresh)",
+        cached_hits, cache_max_age_days
+    );
+
+    // Phase 2: Collect tools that need fresh API calls
+    let mut to_fetch: Vec<(usize, String, String)> = Vec::new();
+    for (i, tool) in tools.iter().enumerate() {
+        if tool.stars.is_some() {
+            continue;
+        }
+        if to_fetch.len() >= max_requests {
             break;
         }
-
         let repo_url = match &tool.links.repo {
             Some(url) => url.clone(),
             None => continue,
         };
-
-        let (owner, repo) = match parse_github_repo(&repo_url) {
-            Some(pair) => pair,
-            None => continue,
-        };
-
-        let api_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-        requests_made += 1;
-
-        let mut req = client
-            .get(&api_url)
-            .header("User-Agent", "clidex-build/0.1")
-            .header("Accept", "application/vnd.github.v3+json");
-
-        if let Some(ref t) = token {
-            req = req.header("Authorization", format!("Bearer {}", t));
+        if let Some((owner, repo)) = parse_github_repo(&repo_url) {
+            to_fetch.push((i, owner, repo));
         }
+    }
+    eprintln!("GitHub stars: {} to fetch via API", to_fetch.len());
 
-        match req.send().await {
-            Ok(resp) if resp.status().is_success() => {
-                if let Ok(json) = resp.json::<serde_json::Value>().await {
-                    if let Some(stars) = json["stargazers_count"].as_u64() {
-                        tool.stars = Some(stars);
-                    }
-                    if let Some(pushed) = json["pushed_at"].as_str() {
-                        tool.last_updated = Some(pushed.to_string());
-                    }
-                    // Try to get docs URL from homepage if it's not github
-                    if tool.links.docs.is_none() {
-                        if let Some(hp) = json["homepage"].as_str() {
-                            if !hp.is_empty()
-                                && !hp.starts_with("https://github.com/")
-                                && tool.links.homepage.is_none()
-                            {
-                                tool.links.homepage = Some(hp.to_string());
-                            }
-                        }
-                    }
+    // Phase 3: Parallel fetch (10 concurrent)
+    let concurrency = 10;
+    let mut fetched = 0;
+    for chunk in to_fetch.chunks(concurrency) {
+        let futures: Vec<_> = chunk
+            .iter()
+            .map(|(_, owner, repo)| {
+                fetch_single_github(owner.clone(), repo.clone(), token.clone(), client.clone())
+            })
+            .collect();
+
+        let results = futures::future::join_all(futures).await;
+
+        for (result, (idx, _, _)) in results.into_iter().zip(chunk.iter()) {
+            if let Some((stars, pushed, homepage)) = result {
+                tools[*idx].stars = Some(stars);
+                if tools[*idx].last_updated.is_none() {
+                    tools[*idx].last_updated = pushed;
                 }
-            }
-            Ok(resp) if resp.status().as_u16() == 403 || resp.status().as_u16() == 429 => {
-                eprintln!("GitHub API: rate limited after {} requests", requests_made);
-                break;
-            }
-            Ok(resp) => {
-                eprintln!("GitHub API: {} returned {}", api_url, resp.status());
-            }
-            Err(e) => {
-                eprintln!("GitHub API: {} failed: {}", api_url, e);
+                if tools[*idx].links.homepage.is_none() {
+                    tools[*idx].links.homepage = homepage;
+                }
+                fetched += 1;
             }
         }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
-    eprintln!("GitHub API: made {} requests", requests_made);
+    eprintln!(
+        "GitHub stars: {} cached + {} fetched = {} total",
+        cached_hits,
+        fetched,
+        cached_hits + fetched
+    );
 }
 
 /// Enrich tools with crates.io install commands
@@ -1656,16 +1770,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     deduplicate(&mut tools);
     eprintln!("After dedup: {} tools", tools.len());
 
-    // Step 3: GitHub stars (limited to avoid rate limiting)
+    // Step 3: GitHub stars (with cache from previous index + parallel fetching)
     let github_limit = std::env::var("GITHUB_LIMIT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(50);
+    let prev_index_path = std::env::args().nth(2).unwrap_or_default();
+    let stars_cache = if !prev_index_path.is_empty() {
+        eprintln!("Loading stars cache from {}...", prev_index_path);
+        let cache = load_stars_cache(&prev_index_path);
+        eprintln!("Loaded {} cached stars entries", cache.len());
+        cache
+    } else {
+        HashMap::new()
+    };
     eprintln!(
-        "Fetching GitHub stars (limit: {}, set GITHUB_LIMIT to change)...",
-        github_limit
+        "Fetching GitHub stars (limit: {}, cache: {} entries)...",
+        github_limit,
+        stars_cache.len()
     );
-    enrich_with_github(&mut tools, &client, github_limit).await;
+    enrich_with_github(&mut tools, &client, github_limit, &stars_cache, 3).await;
     let with_stars = tools.iter().filter(|t| t.stars.is_some()).count();
     eprintln!("Got stars for {} tools", with_stars);
 

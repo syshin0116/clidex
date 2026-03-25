@@ -23,6 +23,7 @@ dirs = "5"
 regex = "1"
 nucleo-matcher = "0.3.1"
 model2vec-rs = { version = "0.1.4", optional = true }
+futures = "0.3.32"
 
 [dev-dependencies]
 

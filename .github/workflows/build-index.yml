@@ -30,8 +30,19 @@ jobs:
       - name: Build index builder
         run: cargo build --release --bin build_index
 
+      - name: Download previous index for stars cache
+        run: |
+          curl -fsSL -o prev_index.yaml \
+            https://github.com/${{ github.repository }}/releases/download/index/index.yaml \
+            2>/dev/null || echo "No previous index found, building from scratch"
+
       - name: Build index
-        run: ./target/release/build_index index.yaml
+        run: |
+          if [ -f prev_index.yaml ]; then
+            ./target/release/build_index index.yaml prev_index.yaml
+          else
+            ./target/release/build_index index.yaml
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_LIMIT: 5000
