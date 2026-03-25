@@ -18,10 +18,11 @@ serde_yaml = "0.9"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["full"] }
 colored = "2"
-fuzzy-matcher = "0.3"
 bm25 = "1"
 dirs = "5"
 regex = "1"
+nucleo-matcher = "0.3.1"
+model2vec-rs = { version = "0.1.4", optional = true }
 
 [dev-dependencies]
 
@@ -29,3 +30,7 @@ regex = "1"
 opt-level = "z"
 lto = true
 strip = true
+
+[features]
+default = []
+semantic = ["dep:model2vec-rs"]

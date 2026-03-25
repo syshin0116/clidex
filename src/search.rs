@@ -1,7 +1,6 @@
 use crate::model::Tool;
 use bm25::{Document, Language, SearchEngineBuilder, SearchResult as BM25Result};
-use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
+use nucleo_matcher::{Config, Matcher, Utf32Str};
 use std::collections::HashMap;
 
 pub struct SearchResult {
@@ -241,8 +240,10 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
     let bm25_fetch = (max_results * 5).max(100);
     let bm25_results: Vec<BM25Result<usize>> = engine.search(&expanded, bm25_fetch);
 
-    // Fuzzy name matching as fallback
-    let fuzzy_matcher = SkimMatcherV2::default();
+    // Fuzzy name matching as fallback (nucleo-matcher)
+    let mut fuzzy_matcher = Matcher::new(Config::DEFAULT);
+    let mut needle_buf = Vec::new();
+    let needle_utf32 = Utf32Str::new(&query_lower, &mut needle_buf);
 
     let mut scored: Vec<SearchResult> = Vec::new();
 
@@ -316,19 +317,29 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
     // For short queries, require higher fuzzy threshold to avoid false positives
     let fuzzy_threshold = if query_lower.len() <= 3 { 80 } else { 50 };
 
+    let mut hay_buf = Vec::new();
     for (i, tool) in tools.iter().enumerate() {
         if bm25_indices.contains(&i) {
             continue;
         }
         let name_lower = tool.name.to_lowercase();
+        hay_buf.clear();
         let fuzzy_score = fuzzy_matcher
-            .fuzzy_match(&name_lower, &query_lower)
+            .fuzzy_match(Utf32Str::new(&name_lower, &mut hay_buf), needle_utf32)
+            .map(|s| s as i64)
             .unwrap_or(0);
 
         let bin_score = tool
             .binary
             .as_ref()
-            .and_then(|b| fuzzy_matcher.fuzzy_match(&b.to_lowercase(), &query_lower))
+            .map(|b| {
+                let bl = b.to_lowercase();
+                hay_buf.clear();
+                fuzzy_matcher
+                    .fuzzy_match(Utf32Str::new(&bl, &mut hay_buf), needle_utf32)
+                    .map(|s| s as i64)
+                    .unwrap_or(0)
+            })
             .unwrap_or(0);
 
         // Exact tag match bonus (helps short queries like "rg", "fd")
@@ -352,6 +363,52 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
     });
     scored.truncate(max_results);
     scored
+}
+
+/// Hybrid search combining BM25 + semantic similarity via RRF
+#[cfg(feature = "semantic")]
+pub fn hybrid_search(
+    tools: &[Tool],
+    query: &str,
+    max_results: usize,
+    embeddings: &[Vec<f32>],
+    query_embedding: &[f32],
+) -> Vec<SearchResult> {
+    if tools.is_empty() || embeddings.len() != tools.len() {
+        return search(tools, query, max_results);
+    }
+
+    // 1. BM25 search (get more candidates for RRF)
+    let bm25_results = search(tools, query, max_results * 3);
+    let bm25_ranked: Vec<(usize, f64)> = bm25_results
+        .iter()
+        .map(|r| {
+            let idx = tools.iter().position(|t| t.name == r.tool.name).unwrap_or(0);
+            (idx, r.score)
+        })
+        .collect();
+
+    // 2. Semantic search — cosine similarity for all tools
+    let mut semantic_scores: Vec<(usize, f32)> = embeddings
+        .iter()
+        .enumerate()
+        .map(|(i, emb)| (i, crate::semantic::cosine_similarity(query_embedding, emb)))
+        .collect();
+    semantic_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    semantic_scores.truncate(max_results * 3);
+
+    // 3. RRF combination
+    let combined = crate::semantic::rrf_combine(&bm25_ranked, &semantic_scores, tools.len(), 60.0);
+
+    // 4. Build results
+    combined
+        .into_iter()
+        .take(max_results)
+        .map(|(idx, score)| SearchResult {
+            tool: tools[idx].clone(),
+            score,
+        })
+        .collect()
 }
 
 pub fn filter_by_category(tools: &[Tool], category: &str) -> Vec<Tool> {

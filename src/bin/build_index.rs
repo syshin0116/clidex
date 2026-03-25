@@ -16,6 +16,8 @@ const AWESOME_TUIS_URL: &str =
     "https://raw.githubusercontent.com/rothgar/awesome-tuis/main/README.md";
 const BREW_ANALYTICS_URL: &str =
     "https://formulae.brew.sh/api/analytics/install-on-request/365d.json";
+const HOMEBREW_CASK_URL: &str = "https://formulae.brew.sh/api/cask.json";
+const NPM_SEARCH_URL: &str = "https://registry.npmjs.org/-/v1/search";
 
 #[derive(Debug, Deserialize)]
 struct BrewFormula {
@@ -24,6 +26,14 @@ struct BrewFormula {
     homepage: Option<String>,
     #[serde(default)]
     keg_only: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrewCask {
+    token: String,
+    name: Vec<String>,
+    desc: Option<String>,
+    homepage: Option<String>,
 }
 
 /// Parse awesome-cli-apps markdown into tools
@@ -1297,6 +1307,144 @@ fn discover_from_homebrew(
     eprintln!("Discovered {} new tools from Homebrew", added);
 }
 
+fn discover_from_homebrew_casks(
+    existing: &mut Vec<Tool>,
+    cask_data: &[BrewCask],
+) {
+    let existing_names: std::collections::HashSet<String> =
+        existing.iter().map(|t| t.name.to_lowercase()).collect();
+
+    // Only include casks that are terminal/CLI related
+    let cli_cask_keywords = [
+        "terminal", "shell", "command-line", "cli", "console",
+        "emulator", "tui", "tmux", "multiplexer",
+    ];
+
+    let mut added = 0;
+    for cask in cask_data {
+        if existing_names.contains(&cask.token.to_lowercase()) {
+            continue;
+        }
+
+        let desc = cask.desc.as_deref().unwrap_or("").to_lowercase();
+        let name_str = cask.name.first().map(|s| s.as_str()).unwrap_or("");
+        let combined = format!("{} {} {}", cask.token, name_str, desc);
+        let combined_lower = combined.to_lowercase();
+
+        if !cli_cask_keywords.iter().any(|kw| combined_lower.contains(kw)) {
+            continue;
+        }
+
+        let desc_str = cask.desc.clone().unwrap_or_else(|| name_str.to_string());
+        let category = auto_categorize(&desc_str, &cask.token);
+        let tags = generate_tags(&cask.token, &desc_str, &category);
+
+        let repo = cask.homepage.as_ref().and_then(|hp| {
+            if hp.starts_with("https://github.com/") { Some(hp.clone()) } else { None }
+        });
+        let homepage = cask.homepage.as_ref().and_then(|hp| {
+            if hp.starts_with("https://github.com/") { None } else { Some(hp.clone()) }
+        });
+
+        let mut install = BTreeMap::new();
+        install.insert("brew".to_string(), format!("brew install --cask {}", cask.token));
+
+        existing.push(Tool {
+            name: cask.token.clone(),
+            binary: None,
+            desc: desc_str,
+            category,
+            tags,
+            install,
+            stars: None,
+            brew_installs_30d: None,
+            links: Links { repo, homepage, docs: None, llms_txt: None },
+            last_updated: None,
+        });
+        added += 1;
+    }
+    eprintln!("Discovered {} CLI-related casks from Homebrew", added);
+}
+
+async fn discover_from_npm(
+    existing: &mut Vec<Tool>,
+    client: &reqwest::Client,
+) {
+    let existing_names: std::collections::HashSet<String> =
+        existing.iter().map(|t| t.name.to_lowercase()).collect();
+
+    // Search for popular CLI packages on npm
+    let queries = ["keywords:cli", "keywords:command-line-tool"];
+    let mut added = 0;
+
+    for query in &queries {
+        let url = format!("{}?text={}&size=50&quality=0.0&popularity=1.0&maintenance=0.0", NPM_SEARCH_URL, query);
+        let resp = match client.get(&url).send().await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let data: serde_json::Value = match resp.json().await {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        if let Some(objects) = data["objects"].as_array() {
+            for obj in objects {
+                let pkg = &obj["package"];
+                let name = match pkg["name"].as_str() {
+                    Some(n) => n,
+                    None => continue,
+                };
+
+                // Skip scoped packages (like @anthropic-ai/claude-code) - use unscoped name
+                let display_name = if name.contains('/') {
+                    name.split('/').last().unwrap_or(name)
+                } else {
+                    name
+                };
+
+                if existing_names.contains(&display_name.to_lowercase()) {
+                    continue;
+                }
+
+                let desc = pkg["description"].as_str().unwrap_or("").to_string();
+                if desc.is_empty() {
+                    continue;
+                }
+
+                let homepage = pkg["links"]["homepage"].as_str().map(String::from);
+                let repo_url = pkg["links"]["repository"].as_str().map(String::from);
+
+                let category = auto_categorize(&desc, display_name);
+                let tags = generate_tags(display_name, &desc, &category);
+
+                let mut install = BTreeMap::new();
+                install.insert("npm".to_string(), format!("npm install -g {}", name));
+
+                existing.push(Tool {
+                    name: display_name.to_string(),
+                    binary: None,
+                    desc,
+                    category,
+                    tags,
+                    install,
+                    stars: None,
+                    brew_installs_30d: None,
+                    links: Links {
+                        repo: repo_url,
+                        homepage,
+                        docs: None,
+                        llms_txt: None,
+                    },
+                    last_updated: None,
+                });
+                added += 1;
+            }
+        }
+    }
+    eprintln!("Discovered {} CLI packages from npm", added);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder()
@@ -1464,6 +1612,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         analytics_applied
     );
 
+    // Step 2b: Fetch Homebrew Cask data
+    eprintln!("Fetching Homebrew cask data...");
+    match brew_client.get(HOMEBREW_CASK_URL).send().await {
+        Ok(resp) => {
+            match resp.json::<Vec<BrewCask>>().await {
+                Ok(cask_data) => {
+                    eprintln!("Fetched {} Homebrew casks", cask_data.len());
+                    discover_from_homebrew_casks(&mut tools, &cask_data);
+                }
+                Err(e) => eprintln!("Warning: Failed to parse cask data: {}", e),
+            }
+        }
+        Err(e) => eprintln!("Warning: Failed to fetch cask data: {}", e),
+    }
+
+    // Step 2c: Discover CLI packages from npm
+    eprintln!("Discovering popular CLI packages from npm...");
+    discover_from_npm(&mut tools, &client).await;
+
     // Deduplicate
     deduplicate(&mut tools);
     eprintln!("After dedup: {} tools", tools.len());
@@ -1528,6 +1695,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     clidex::index::save_index(&index, std::path::Path::new(&output_path))?;
+
+    // Step 8: Generate embeddings (if semantic feature is enabled)
+    #[cfg(feature = "semantic")]
+    {
+        eprintln!("Generating semantic embeddings...");
+        match model2vec_rs::model::StaticModel::from_pretrained(
+            "minishlab/potion-base-2M",
+            None,
+            None,
+            None,
+        ) {
+            Ok(model) => {
+                let texts: Vec<String> = index
+                    .tools
+                    .iter()
+                    .map(|t| format!("{} {} {}", t.name, t.desc, t.tags.join(" ")))
+                    .collect();
+                let embeddings = model.encode(&texts);
+                let dim = embeddings.first().map(|e| e.len()).unwrap_or(64);
+
+                let emb_path =
+                    std::path::Path::new(&output_path).with_extension("embeddings.bin");
+                match clidex::semantic::save_embeddings(&embeddings, dim, &emb_path) {
+                    Ok(()) => eprintln!(
+                        "Saved {} embeddings ({}d) to {:?}",
+                        embeddings.len(),
+                        dim,
+                        emb_path
+                    ),
+                    Err(e) => eprintln!("Warning: Failed to save embeddings: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Warning: Failed to load model2vec: {}", e),
+        }
+    }
 
     eprintln!("\nIndex saved to: {}", output_path);
     eprintln!("Total tools: {}", index.tools.len());

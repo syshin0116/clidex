@@ -221,7 +221,47 @@ async fn main() {
     // Handle search query
     if let Some(ref query) = cli.query {
         let idx = load_or_exit();
+
+        #[cfg(feature = "semantic")]
+        let results = {
+            let emb_path = clidex::config::embeddings_path();
+            if emb_path.exists() {
+                match clidex::semantic::load_embeddings(&emb_path) {
+                    Ok(embeddings) if embeddings.len() == idx.tools.len() => {
+                        // Load model for query embedding
+                        match model2vec_rs::model::StaticModel::from_pretrained(
+                            "minishlab/potion-base-2M",
+                            None,
+                            None,
+                            None,
+                        ) {
+                            Ok(model) => {
+                                let query_emb = model.encode(&[query.to_string()]);
+                                if !query_emb.is_empty() {
+                                    search::hybrid_search(
+                                        &idx.tools,
+                                        query,
+                                        cli.max_results,
+                                        &embeddings,
+                                        &query_emb[0],
+                                    )
+                                } else {
+                                    search::search(&idx.tools, query, cli.max_results)
+                                }
+                            }
+                            Err(_) => search::search(&idx.tools, query, cli.max_results),
+                        }
+                    }
+                    _ => search::search(&idx.tools, query, cli.max_results),
+                }
+            } else {
+                search::search(&idx.tools, query, cli.max_results)
+            }
+        };
+
+        #[cfg(not(feature = "semantic"))]
         let results = search::search(&idx.tools, query, cli.max_results);
+
         if results.is_empty() {
             eprintln!("No tools found for: {query}");
             std::process::exit(1);
