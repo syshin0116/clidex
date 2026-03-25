@@ -20,9 +20,7 @@ pub fn load_embeddings(path: &Path) -> Result<Vec<Vec<f32>>, Box<dyn std::error:
     let mut embeddings = Vec::with_capacity(count);
     for _ in 0..count {
         let mut vec = vec![0f32; dim];
-        let bytes = unsafe {
-            std::slice::from_raw_parts_mut(vec.as_mut_ptr() as *mut u8, dim * 4)
-        };
+        let bytes = unsafe { std::slice::from_raw_parts_mut(vec.as_mut_ptr() as *mut u8, dim * 4) };
         file.read_exact(bytes)?;
         embeddings.push(vec);
     }
@@ -43,9 +41,7 @@ pub fn save_embeddings(
     file.write_all(&(dim as u32).to_le_bytes())?;
 
     for emb in embeddings {
-        let bytes = unsafe {
-            std::slice::from_raw_parts(emb.as_ptr() as *const u8, dim * 4)
-        };
+        let bytes = unsafe { std::slice::from_raw_parts(emb.as_ptr() as *const u8, dim * 4) };
         file.write_all(bytes)?;
     }
 
@@ -66,7 +62,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 /// Reciprocal Rank Fusion to combine two ranked lists
 /// Returns combined scores indexed by tool position
 pub fn rrf_combine(
-    bm25_ranked: &[(usize, f64)],    // (tool_idx, score) sorted by score desc
+    bm25_ranked: &[(usize, f64)], // (tool_idx, score) sorted by score desc
     semantic_ranked: &[(usize, f32)], // (tool_idx, similarity) sorted by sim desc
     total_tools: usize,
     k: f64,

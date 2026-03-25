@@ -383,7 +383,10 @@ pub fn hybrid_search(
     let bm25_ranked: Vec<(usize, f64)> = bm25_results
         .iter()
         .map(|r| {
-            let idx = tools.iter().position(|t| t.name == r.tool.name).unwrap_or(0);
+            let idx = tools
+                .iter()
+                .position(|t| t.name == r.tool.name)
+                .unwrap_or(0);
             (idx, r.score)
         })
         .collect();

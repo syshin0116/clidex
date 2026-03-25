@@ -1307,17 +1307,21 @@ fn discover_from_homebrew(
     eprintln!("Discovered {} new tools from Homebrew", added);
 }
 
-fn discover_from_homebrew_casks(
-    existing: &mut Vec<Tool>,
-    cask_data: &[BrewCask],
-) {
+fn discover_from_homebrew_casks(existing: &mut Vec<Tool>, cask_data: &[BrewCask]) {
     let existing_names: std::collections::HashSet<String> =
         existing.iter().map(|t| t.name.to_lowercase()).collect();
 
     // Only include casks that are terminal/CLI related
     let cli_cask_keywords = [
-        "terminal", "shell", "command-line", "cli", "console",
-        "emulator", "tui", "tmux", "multiplexer",
+        "terminal",
+        "shell",
+        "command-line",
+        "cli",
+        "console",
+        "emulator",
+        "tui",
+        "tmux",
+        "multiplexer",
     ];
 
     let mut added = 0;
@@ -1331,7 +1335,10 @@ fn discover_from_homebrew_casks(
         let combined = format!("{} {} {}", cask.token, name_str, desc);
         let combined_lower = combined.to_lowercase();
 
-        if !cli_cask_keywords.iter().any(|kw| combined_lower.contains(kw)) {
+        if !cli_cask_keywords
+            .iter()
+            .any(|kw| combined_lower.contains(kw))
+        {
             continue;
         }
 
@@ -1340,14 +1347,25 @@ fn discover_from_homebrew_casks(
         let tags = generate_tags(&cask.token, &desc_str, &category);
 
         let repo = cask.homepage.as_ref().and_then(|hp| {
-            if hp.starts_with("https://github.com/") { Some(hp.clone()) } else { None }
+            if hp.starts_with("https://github.com/") {
+                Some(hp.clone())
+            } else {
+                None
+            }
         });
         let homepage = cask.homepage.as_ref().and_then(|hp| {
-            if hp.starts_with("https://github.com/") { None } else { Some(hp.clone()) }
+            if hp.starts_with("https://github.com/") {
+                None
+            } else {
+                Some(hp.clone())
+            }
         });
 
         let mut install = BTreeMap::new();
-        install.insert("brew".to_string(), format!("brew install --cask {}", cask.token));
+        install.insert(
+            "brew".to_string(),
+            format!("brew install --cask {}", cask.token),
+        );
 
         existing.push(Tool {
             name: cask.token.clone(),
@@ -1358,7 +1376,12 @@ fn discover_from_homebrew_casks(
             install,
             stars: None,
             brew_installs_30d: None,
-            links: Links { repo, homepage, docs: None, llms_txt: None },
+            links: Links {
+                repo,
+                homepage,
+                docs: None,
+                llms_txt: None,
+            },
             last_updated: None,
         });
         added += 1;
@@ -1366,10 +1389,7 @@ fn discover_from_homebrew_casks(
     eprintln!("Discovered {} CLI-related casks from Homebrew", added);
 }
 
-async fn discover_from_npm(
-    existing: &mut Vec<Tool>,
-    client: &reqwest::Client,
-) {
+async fn discover_from_npm(existing: &mut Vec<Tool>, client: &reqwest::Client) {
     let existing_names: std::collections::HashSet<String> =
         existing.iter().map(|t| t.name.to_lowercase()).collect();
 
@@ -1378,7 +1398,10 @@ async fn discover_from_npm(
     let mut added = 0;
 
     for query in &queries {
-        let url = format!("{}?text={}&size=50&quality=0.0&popularity=1.0&maintenance=0.0", NPM_SEARCH_URL, query);
+        let url = format!(
+            "{}?text={}&size=50&quality=0.0&popularity=1.0&maintenance=0.0",
+            NPM_SEARCH_URL, query
+        );
         let resp = match client.get(&url).send().await {
             Ok(r) => r,
             Err(_) => continue,
@@ -1615,15 +1638,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 2b: Fetch Homebrew Cask data
     eprintln!("Fetching Homebrew cask data...");
     match brew_client.get(HOMEBREW_CASK_URL).send().await {
-        Ok(resp) => {
-            match resp.json::<Vec<BrewCask>>().await {
-                Ok(cask_data) => {
-                    eprintln!("Fetched {} Homebrew casks", cask_data.len());
-                    discover_from_homebrew_casks(&mut tools, &cask_data);
-                }
-                Err(e) => eprintln!("Warning: Failed to parse cask data: {}", e),
+        Ok(resp) => match resp.json::<Vec<BrewCask>>().await {
+            Ok(cask_data) => {
+                eprintln!("Fetched {} Homebrew casks", cask_data.len());
+                discover_from_homebrew_casks(&mut tools, &cask_data);
             }
-        }
+            Err(e) => eprintln!("Warning: Failed to parse cask data: {}", e),
+        },
         Err(e) => eprintln!("Warning: Failed to fetch cask data: {}", e),
     }
 
@@ -1715,8 +1736,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let embeddings = model.encode(&texts);
                 let dim = embeddings.first().map(|e| e.len()).unwrap_or(64);
 
-                let emb_path =
-                    std::path::Path::new(&output_path).with_extension("embeddings.bin");
+                let emb_path = std::path::Path::new(&output_path).with_extension("embeddings.bin");
                 match clidex::semantic::save_embeddings(&embeddings, dim, &emb_path) {
                     Ok(()) => eprintln!(
                         "Saved {} embeddings ({}d) to {:?}",
