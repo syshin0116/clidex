@@ -1257,7 +1257,7 @@ fn discover_from_homebrew(
         let has_github = formula
             .homepage
             .as_ref()
-            .map_or(false, |h| h.starts_with("https://github.com/"));
+            .is_some_and(|h| h.starts_with("https://github.com/"));
 
         if installs < 5000 && !has_github {
             continue;
@@ -1398,7 +1398,7 @@ async fn discover_from_npm(
 
                 // Skip scoped packages (like @anthropic-ai/claude-code) - use unscoped name
                 let display_name = if name.contains('/') {
-                    name.split('/').last().unwrap_or(name)
+                    name.split('/').next_back().unwrap_or(name)
                 } else {
                     name
                 };
