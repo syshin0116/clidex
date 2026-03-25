@@ -42,8 +42,10 @@ jobs:
 
       - name: Upload index as release asset
         run: |
-          # Create or update the "index" release
-          gh release delete index --yes 2>/dev/null || true
+          # Delete existing release if it exists (ignore errors)
+          gh release delete index --yes --cleanup-tag 2>/dev/null || true
+          sleep 2
+          # Create new release with index file
           gh release create index \
             --title "Latest Index" \
             --notes "Auto-generated CLI tool index. Updated daily." \
@@ -51,3 +53,4 @@ jobs:
             index.yaml
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
