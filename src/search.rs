@@ -70,6 +70,96 @@ const SYNONYMS: &[(&str, &[&str])] = &[
     ("count", &["lines", "wc", "statistics", "loc", "sloc"]),
 ];
 
+const QUERY_NOISE: &[&str] = &[
+    "fast",
+    "modern",
+    "simple",
+    "easy",
+    "best",
+    "good",
+    "nice",
+    "great",
+    "better",
+    "alternative",
+    "replacement",
+    "like",
+    "similar",
+    "beautiful",
+    "tool",
+    "tools",
+    "command",
+    "program",
+    "app",
+    "application",
+    "utility",
+    "want",
+    "need",
+    "looking",
+    "for",
+    "something",
+    "that",
+    "can",
+    "way",
+    "how",
+    "what",
+    "which",
+    "the",
+    "my",
+    "your",
+    "please",
+    "show",
+    "me",
+    "i",
+    "a",
+    "an",
+    "is",
+    "are",
+    "of",
+    "to",
+    "in",
+    "with",
+    "using",
+];
+
+/// Popularity boost using stars (primary) or brew install count (fallback)
+fn popularity_boost(tool: &Tool) -> f64 {
+    // Primary: GitHub stars
+    if let Some(s) = tool.stars {
+        if s > 0 {
+            return match s {
+                s if s > 50000 => 20.0,
+                s if s > 10000 => 12.0 + 8.0 * (s as f64 - 10000.0) / 40000.0,
+                s if s > 1000 => 4.0 + 8.0 * (s as f64 - 1000.0) / 9000.0,
+                s => (s as f64 / 1000.0) * 4.0,
+            };
+        }
+    }
+    // Fallback: Homebrew install-on-request (annual)
+    if let Some(installs) = tool.brew_installs_30d {
+        if installs > 0 {
+            return match installs {
+                i if i > 500000 => 18.0,
+                i if i > 100000 => 10.0 + 8.0 * (i as f64 - 100000.0) / 400000.0,
+                i if i > 10000 => 4.0 + 6.0 * (i as f64 - 10000.0) / 90000.0,
+                i => (i as f64 / 10000.0) * 4.0,
+            };
+        }
+    }
+    0.5 // no popularity data — lower default
+}
+
+fn preprocess_query(query: &str) -> String {
+    let terms: Vec<&str> = query
+        .split_whitespace()
+        .filter(|t| !QUERY_NOISE.contains(&t.to_lowercase().as_str()))
+        .collect();
+    if terms.is_empty() {
+        query.to_string()
+    } else {
+        terms.join(" ")
+    }
+}
+
 fn build_synonym_map() -> HashMap<&'static str, &'static [&'static str]> {
     SYNONYMS.iter().copied().collect()
 }
@@ -129,6 +219,8 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
     }
 
     let syn_map = build_synonym_map();
+    let query_for_search = preprocess_query(query);
+    let query_lower = query.to_lowercase(); // original for exact matching
 
     // BM25 search
     let documents: Vec<Document<usize>> = tools
@@ -144,14 +236,13 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
         .b(0.5) // lower length normalization (docs are padded via repetition)
         .build();
 
-    let expanded = expand_query(query, &syn_map);
+    let expanded = expand_query(&query_for_search, &syn_map);
     // Always fetch enough candidates for re-ranking (category boost, popularity, etc.)
-    let bm25_fetch = (max_results * 5).max(50);
+    let bm25_fetch = (max_results * 5).max(100);
     let bm25_results: Vec<BM25Result<usize>> = engine.search(&expanded, bm25_fetch);
 
     // Fuzzy name matching as fallback
     let fuzzy_matcher = SkimMatcherV2::default();
-    let query_lower = query.to_lowercase();
 
     let mut scored: Vec<SearchResult> = Vec::new();
 
@@ -174,6 +265,15 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
             0.0
         };
 
+        // Description match bonus — reward when query terms appear directly in description
+        let desc_lower = tool.desc.to_lowercase();
+        let query_terms: Vec<&str> = query_for_search.split_whitespace().collect();
+        let desc_match_count = query_terms
+            .iter()
+            .filter(|t| t.len() > 2 && desc_lower.contains(&t.to_lowercase()))
+            .count();
+        let desc_bonus = desc_match_count as f64 * 5.0;
+
         // Category match bonus — if query terms appear in the category, boost
         // Uses stemming-like matching (checks if cat word starts with query term or vice versa)
         let cat_lower = tool.category.to_lowercase();
@@ -182,7 +282,8 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
             .filter(|w| w.len() > 2)
             .collect();
         let cat_bonus = {
-            let matching_terms = query_lower
+            let matching_terms = query_for_search
+                .to_lowercase()
                 .split_whitespace()
                 .filter(|t| {
                     t.len() > 2
@@ -191,19 +292,17 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
                             .any(|cw| cw.starts_with(t) || t.starts_with(cw))
                 })
                 .count();
-            matching_terms as f64 * 8.0
+            if desc_match_count > 0 {
+                matching_terms as f64 * 8.0
+            } else {
+                matching_terms as f64 * 2.0 // weak bonus if category matches but description doesn't
+            }
         };
 
-        // Popularity boost (normalized 0-10)
-        let pop_boost = match tool.stars {
-            Some(s) if s > 50000 => 10.0,
-            Some(s) if s > 10000 => 6.0 + 4.0 * (s as f64 - 10000.0) / 40000.0,
-            Some(s) if s > 1000 => 2.0 + 4.0 * (s as f64 - 1000.0) / 9000.0,
-            Some(s) => (s as f64 / 1000.0) * 2.0,
-            None => 1.0,
-        };
+        // Popularity boost (normalized 0-20) — uses stars, falls back to brew installs
+        let pop_boost = popularity_boost(tool);
 
-        let final_score = bm25_score + name_bonus + cat_bonus + pop_boost;
+        let final_score = bm25_score + name_bonus + cat_bonus + pop_boost + desc_bonus;
         scored.push(SearchResult {
             tool: tool.clone(),
             score: final_score,
@@ -237,13 +336,7 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
 
         let best_fuzzy = fuzzy_score.max(bin_score);
         if best_fuzzy > fuzzy_threshold || tag_match {
-            let pop_boost = match tool.stars {
-                Some(s) if s > 50000 => 10.0,
-                Some(s) if s > 10000 => 6.0 + 4.0 * (s as f64 - 10000.0) / 40000.0,
-                Some(s) if s > 1000 => 2.0 + 4.0 * (s as f64 - 1000.0) / 9000.0,
-                Some(s) => (s as f64 / 1000.0) * 2.0,
-                None => 1.0,
-            };
+            let pop_boost = popularity_boost(tool);
             let tag_bonus = if tag_match { 20.0 } else { 0.0 };
             scored.push(SearchResult {
                 tool: tool.clone(),

@@ -10,6 +10,12 @@ const TOOLLEEO_APPS_URL: &str =
     "https://raw.githubusercontent.com/toolleeo/cli-apps/master/data/apps.csv";
 const TOOLLEEO_CATEGORIES_URL: &str =
     "https://raw.githubusercontent.com/toolleeo/cli-apps/master/data/categories.csv";
+const MODERN_UNIX_URL: &str =
+    "https://raw.githubusercontent.com/ibraheemdev/modern-unix/master/readme.md";
+const AWESOME_TUIS_URL: &str =
+    "https://raw.githubusercontent.com/rothgar/awesome-tuis/main/README.md";
+const BREW_ANALYTICS_URL: &str =
+    "https://formulae.brew.sh/api/analytics/install-on-request/365d.json";
 
 #[derive(Debug, Deserialize)]
 struct BrewFormula {
@@ -916,26 +922,90 @@ async fn probe_llms_txt(tools: &mut [Tool], client: &reqwest::Client, max_probes
     eprintln!("llms.txt: probed {} URLs, found {}", probed, found);
 }
 
-/// Deduplicate tools by name (case-insensitive, keep the one with more data)
+/// Deduplicate tools by repo URL and name, merging data from duplicates
 fn deduplicate(tools: &mut Vec<Tool>) {
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    // Phase 1: Merge by repo URL — collect merge pairs first
+    let mut by_repo: HashMap<String, usize> = HashMap::new();
     let mut to_remove = Vec::new();
+    // (target_idx, source_idx) pairs for merging
+    let mut merge_pairs: Vec<(usize, usize)> = Vec::new();
 
     for (i, tool) in tools.iter().enumerate() {
+        if let Some(ref repo) = tool.links.repo {
+            let key = repo
+                .trim_end_matches('/')
+                .trim_end_matches(".git")
+                .to_lowercase();
+            if let Some(&prev_idx) = by_repo.get(&key) {
+                merge_pairs.push((prev_idx, i));
+                to_remove.push(i);
+            } else {
+                by_repo.insert(key, i);
+            }
+        }
+    }
+
+    // Apply merges (source into target)
+    for (target_idx, source_idx) in &merge_pairs {
+        let other = tools[*source_idx].clone();
+        let base = &mut tools[*target_idx];
+
+        // Keep longer description
+        if other.desc.len() > base.desc.len() {
+            base.desc = other.desc;
+        }
+        // Merge install methods
+        for (k, v) in other.install {
+            base.install.entry(k).or_insert(v);
+        }
+        // Merge tags
+        for tag in other.tags {
+            if !base.tags.contains(&tag) {
+                base.tags.push(tag);
+            }
+        }
+        // Keep higher stars
+        match (base.stars, other.stars) {
+            (None, Some(s)) => base.stars = Some(s),
+            (Some(a), Some(b)) if b > a => base.stars = Some(b),
+            _ => {}
+        }
+        // Fill empty links
+        if base.links.homepage.is_none() {
+            base.links.homepage = other.links.homepage;
+        }
+        if base.links.docs.is_none() {
+            base.links.docs = other.links.docs;
+        }
+        // Keep brew_installs_30d
+        if base.brew_installs_30d.is_none() {
+            base.brew_installs_30d = other.brew_installs_30d;
+        }
+    }
+
+    // Phase 2: Merge by name (for entries without repo URL)
+    let mut by_name: HashMap<String, usize> = HashMap::new();
+    for (i, tool) in tools.iter().enumerate() {
+        if to_remove.contains(&i) {
+            continue;
+        }
         let key = tool.name.to_lowercase();
-        if let Some(&prev_idx) = seen.get(&key) {
-            // Keep the one with more data
+        if let Some(&prev_idx) = by_name.get(&key) {
+            if to_remove.contains(&prev_idx) {
+                by_name.insert(key, i);
+                continue;
+            }
             let prev = &tools[prev_idx];
             let prev_score = prev.install.len() + prev.tags.len() + prev.stars.is_some() as usize;
             let cur_score = tool.install.len() + tool.tags.len() + tool.stars.is_some() as usize;
             if cur_score > prev_score {
                 to_remove.push(prev_idx);
-                seen.insert(key, i);
+                by_name.insert(key, i);
             } else {
                 to_remove.push(i);
             }
         } else {
-            seen.insert(key, i);
+            by_name.insert(key, i);
         }
     }
 
@@ -944,6 +1014,287 @@ fn deduplicate(tools: &mut Vec<Tool>) {
     for idx in to_remove.into_iter().rev() {
         tools.remove(idx);
     }
+}
+
+fn auto_categorize(desc: &str, name: &str) -> String {
+    let desc_lower = desc.to_lowercase();
+    let name_lower = name.to_lowercase();
+    let text = format!("{} {}", name_lower, desc_lower);
+
+    let rules: &[(&[&str], &str)] = &[
+        (
+            &["docker", "container", "podman", "image layer"],
+            "Development > Docker",
+        ),
+        (
+            &["kubernetes", "k8s", "kubectl", "helm"],
+            "Development > Kubernetes",
+        ),
+        (
+            &["git ", "git-", "commit", "branch", "version control"],
+            "Version Control > Git",
+        ),
+        (
+            &["linter", "lint ", "linting", "code quality"],
+            "Development > Linting",
+        ),
+        (
+            &["formatter", "formatting", "prettify", "beautif"],
+            "Development > Formatting",
+        ),
+        (
+            &["http client", "http request", "curl", "api client"],
+            "Development > HTTP Client",
+        ),
+        (
+            &["http test", "api test", "load test"],
+            "Development > Testing",
+        ),
+        (
+            &["file manager", "file explorer", "file browser"],
+            "Files and Directories > File Managers",
+        ),
+        (
+            &["search", "grep", "find files", "regex"],
+            "Files and Directories > Search",
+        ),
+        (
+            &["rename", "batch rename"],
+            "Files and Directories > Renaming",
+        ),
+        (
+            &["shell history", "history search"],
+            "Utilities > Shell History",
+        ),
+        (&["shell ", "bash ", "zsh ", "fish "], "Utilities > Shell"),
+        (
+            &["prompt", "starship", "powerline"],
+            "Utilities > Shell Prompt",
+        ),
+        (
+            &["monitor", "system monitor", "top ", "htop", "process"],
+            "Utilities > System Monitoring",
+        ),
+        (
+            &["disk usage", "disk space", " du "],
+            "Utilities > Disk Usage",
+        ),
+        (
+            &["json", "yaml", "toml", "csv", "data process"],
+            "Data Manipulation > Processors",
+        ),
+        (
+            &["encrypt", "decrypt", "cipher", "crypto", "gpg", "age "],
+            "Security > Encryption",
+        ),
+        (&["terminal emulator"], "Utilities > Terminal Emulator"),
+        (
+            &["multiplexer", "tmux", "terminal workspace"],
+            "Utilities > Terminal Multiplexer",
+        ),
+        (
+            &["package manager", "package installer", "dependency manager"],
+            "Development > Package Manager",
+        ),
+        (
+            &[
+                "version manager",
+                "node manager",
+                "python manager",
+                "runtime manager",
+            ],
+            "Development > Version Manager",
+        ),
+        (
+            &["benchmark", "timing", "performance", "profil"],
+            "Development > Benchmarking",
+        ),
+        (
+            &["editor", "text editor", "vim", "neovim", "nano"],
+            "Development > Editor",
+        ),
+        (&["markdown", "md "], "Utilities > Markdown"),
+        (
+            &["test ", "testing", "test framework", "unit test"],
+            "Development > Testing",
+        ),
+        (
+            &["ci/cd", "ci cd", "deploy", "devops", "release"],
+            "Development > DevOps",
+        ),
+        (&["diff", "compare", "merge"], "Development > Diff"),
+        (
+            &["network", "dns", "ping", "traceroute", "ip "],
+            "Utilities > Networking",
+        ),
+        (
+            &["download", "wget", "fetch", "scrape"],
+            "Utilities > Download",
+        ),
+        (
+            &["compress", "decompress", "archive", "zip", "tar", "gzip"],
+            "Utilities > Compression",
+        ),
+        (
+            &["image", "photo", "picture", "png", "jpg", "svg"],
+            "Utilities > Image Processing",
+        ),
+        (
+            &["video", "media", "stream", "mp4", "ffmpeg"],
+            "Utilities > Media",
+        ),
+        (
+            &["database", "sql", "sqlite", "postgres", "mysql", "redis"],
+            "Development > Database",
+        ),
+        (
+            &[
+                "ai ",
+                "llm",
+                "gpt",
+                "claude",
+                "openai",
+                "gemini",
+                "copilot",
+                "coding assistant",
+            ],
+            "AI > LLM Interaction",
+        ),
+        (&["clipboard", "copy", "paste"], "Utilities > Clipboard"),
+        (
+            &["note", "todo", "task", "productivity"],
+            "Productivity > Note Taking",
+        ),
+        (&["presentation", "slides"], "Productivity > Presentations"),
+        (
+            &["log ", "logging", "log viewer", "log file"],
+            "Utilities > Log Viewer",
+        ),
+        (
+            &["hex ", "hex viewer", "hexdump", "binary viewer"],
+            "Utilities > Hex Viewer",
+        ),
+        (
+            &["watch ", "file watch", "file change"],
+            "Utilities > File Watching",
+        ),
+        (
+            &["typesett", "latex", "tex ", "document"],
+            "Utilities > Document Processing",
+        ),
+        (&["spell", "grammar", "typo"], "Development > Spell Check"),
+    ];
+
+    for (keywords, category) in rules {
+        if keywords.iter().any(|kw| text.contains(kw)) {
+            return category.to_string();
+        }
+    }
+
+    "Utilities > General".to_string()
+}
+
+/// Discover CLI tools from Homebrew formulae not already in the index
+fn discover_from_homebrew(
+    existing: &mut Vec<Tool>,
+    brew_data: &[BrewFormula],
+    analytics: &HashMap<String, u64>,
+) {
+    let existing_names: std::collections::HashSet<String> =
+        existing.iter().map(|t| t.name.to_lowercase()).collect();
+
+    // Only hard-exclude things that are definitely NOT tools
+    let hard_exclude = [
+        "programming language",
+        "runtime environment",
+        "object-relational database",
+        "relational database",
+        "database system",
+        "message queue",
+        "message broker",
+        "web server",
+        "proxy server",
+        "http server",
+        "smtp server",
+        "compiler collection",
+        "compiler infrastructure",
+        "x11 ",
+        "x.org",
+        "protocol buffers",
+    ];
+
+    let mut added = 0;
+    for formula in brew_data {
+        let name = &formula.name;
+        if existing_names.contains(&name.to_lowercase()) {
+            continue;
+        }
+        if formula.keg_only {
+            continue;
+        }
+        if name.contains('@') {
+            continue;
+        }
+
+        let desc = formula.desc.as_deref().unwrap_or("").to_lowercase();
+        if hard_exclude.iter().any(|kw| desc.contains(kw)) {
+            continue;
+        }
+
+        // Require minimum popularity: either in analytics with >5000 installs/year,
+        // OR has a GitHub homepage (suggests it's a maintained project)
+        let installs = analytics.get(name).copied().unwrap_or(0);
+        let has_github = formula
+            .homepage
+            .as_ref()
+            .map_or(false, |h| h.starts_with("https://github.com/"));
+
+        if installs < 5000 && !has_github {
+            continue;
+        }
+
+        let desc_str = formula.desc.clone().unwrap_or_default();
+        let category = auto_categorize(&desc_str, name);
+        let tags = generate_tags(name, &desc_str, &category);
+
+        let homepage = formula.homepage.as_ref().and_then(|hp| {
+            if hp.starts_with("https://github.com/") {
+                None
+            } else {
+                Some(hp.clone())
+            }
+        });
+        let repo = formula.homepage.as_ref().and_then(|hp| {
+            if hp.starts_with("https://github.com/") {
+                Some(hp.clone())
+            } else {
+                None
+            }
+        });
+
+        let mut install = BTreeMap::new();
+        install.insert("brew".to_string(), format!("brew install {}", name));
+
+        existing.push(Tool {
+            name: name.to_string(),
+            binary: None,
+            desc: desc_str,
+            category,
+            tags,
+            install,
+            stars: None,
+            brew_installs_30d: if installs > 0 { Some(installs) } else { None },
+            links: Links {
+                repo,
+                homepage,
+                docs: None,
+                llms_txt: None,
+            },
+            last_updated: None,
+        });
+        added += 1;
+    }
+    eprintln!("Discovered {} new tools from Homebrew", added);
 }
 
 #[tokio::main]
@@ -1006,6 +1357,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     eprintln!("Added {} new tools from toolleeo/cli-apps", toolleeo_added);
 
+    // Step 1c: Fetch additional awesome lists
+    for (url, source_name) in &[
+        (MODERN_UNIX_URL, "modern-unix"),
+        (AWESOME_TUIS_URL, "awesome-tuis"),
+    ] {
+        eprintln!("Fetching {}...", source_name);
+        match client.get(*url).send().await {
+            Ok(resp) => match resp.text().await {
+                Ok(md) => {
+                    let extra_tools = parse_awesome_cli_apps(&md);
+                    eprintln!("Parsed {} tools from {}", extra_tools.len(), source_name);
+                    let existing_names: std::collections::HashSet<String> =
+                        tools.iter().map(|t| t.name.to_lowercase()).collect();
+                    let mut extra_added = 0;
+                    for tool in extra_tools {
+                        if !existing_names.contains(&tool.name.to_lowercase()) {
+                            tools.push(tool);
+                            extra_added += 1;
+                        }
+                    }
+                    eprintln!("Added {} new tools from {}", extra_added, source_name);
+                }
+                Err(e) => eprintln!("Warning: Failed to read {}: {}", source_name, e),
+            },
+            Err(e) => eprintln!("Warning: Failed to fetch {}: {}", source_name, e),
+        }
+    }
+
     // Step 2: Fetch Homebrew data + enrich + add missing CLI tools
     eprintln!("Fetching Homebrew formula data...");
     let brew_client = reqwest::Client::builder()
@@ -1032,6 +1411,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!(
         "Added {} popular CLI tools from Homebrew",
         tools.len() - before
+    );
+
+    // Fetch Homebrew analytics
+    eprintln!("Fetching Homebrew install-on-request analytics...");
+    let brew_analytics: HashMap<String, u64> = match client.get(BREW_ANALYTICS_URL).send().await {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(data) => data["items"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .filter_map(|item| {
+                    let name = item["formula"].as_str()?;
+                    let count = item["count"]
+                        .as_str()?
+                        .replace(',', "")
+                        .parse::<u64>()
+                        .ok()?;
+                    Some((name.to_string(), count))
+                })
+                .collect(),
+            Err(e) => {
+                eprintln!("Warning: Failed to parse analytics: {}", e);
+                HashMap::new()
+            }
+        },
+        Err(e) => {
+            eprintln!("Warning: Failed to fetch analytics: {}", e);
+            HashMap::new()
+        }
+    };
+    eprintln!("Got analytics for {} formulae", brew_analytics.len());
+
+    // Discover new tools from Homebrew (broad inclusion)
+    discover_from_homebrew(&mut tools, &brew_data, &brew_analytics);
+
+    // Apply brew analytics to ALL tools (not just Homebrew-discovered ones)
+    let mut analytics_applied = 0;
+    for tool in tools.iter_mut() {
+        if tool.brew_installs_30d.is_none() {
+            if let Some(&count) = brew_analytics.get(&tool.name) {
+                tool.brew_installs_30d = Some(count);
+                analytics_applied += 1;
+            } else if let Some(&count) = brew_analytics.get(&tool.name.to_lowercase()) {
+                tool.brew_installs_30d = Some(count);
+                analytics_applied += 1;
+            }
+        }
+    }
+    eprintln!(
+        "Applied brew analytics to {} additional tools",
+        analytics_applied
     );
 
     // Deduplicate

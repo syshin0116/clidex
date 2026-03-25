@@ -38,7 +38,7 @@ jobs:
           CRATES_LIMIT: 1000
           NPM_LIMIT: 500
           LLMS_LIMIT: 500
-          TOOLLEEO_LIMIT: 0
+          TOOLLEEO_LIMIT: 500
 
       - name: Upload index as release asset
         run: |
