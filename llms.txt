@@ -1,6 +1,8 @@
 # Clidex
 
-> CLI tool discovery for AI agents. Search, compare, and install 440+ command-line tools with structured YAML/JSON output.
+> CLI tool discovery for AI agents. Search, compare, and install 5,000+ command-line tools with structured YAML/JSON output.
+
+Clidex indexes CLI tools from Homebrew, awesome-cli-apps, toolleeo, npm, and crates.io. It returns structured YAML/JSON with install commands, GitHub stars, and documentation links. Designed for AI agents that need to discover and install CLI tools programmatically.
 
 ## Installation
 
@@ -8,54 +10,48 @@
 cargo install clidex
 # or
 curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
-```
 
-After installing, download the tool index:
-
-```bash
-clidex update
+clidex update    # Download the tool index
 ```
 
 ## Commands
 
-### Search (default command)
+### Search
 
 ```bash
-clidex "csv to json"              # YAML output (default)
-clidex "file manager" -n 3        # Limit results
+clidex "csv to json"              # YAML output (default, agent-friendly)
+clidex "csv to json" --pretty     # Human-friendly table
+clidex "csv to json" --json       # JSON output
+clidex "file manager" -n 3        # Top 3 results
 ```
 
 ### Tool info
 
 ```bash
-clidex info ripgrep
+clidex info jq                    # Full metadata
+clidex info jq --pretty
 ```
 
-### Compare tools
+### Compare
 
 ```bash
-clidex compare jq dasel yq
+clidex compare jq dasel yq        # Side-by-side comparison
 ```
 
-### Trending
+### Browse
 
 ```bash
-clidex trending                   # Top tools by GitHub stars
-clidex trending -n 10
+clidex trending -n 10             # Most popular by stars
 clidex trending --category git
+clidex --categories               # List all categories
+clidex --category docker          # Filter by category
 ```
 
-### Categories
-
-```bash
-clidex --categories               # List all categories with tool counts
-clidex --category docker          # All tools in a category
-```
-
-### Update index
+### Update
 
 ```bash
 clidex update                     # Download latest index
+clidex stats                      # Index statistics
 ```
 
 ## Output Formats
@@ -66,27 +62,44 @@ clidex update                     # Download latest index
 
 ## Output Schema
 
-Each tool in the result contains:
-
 ```yaml
 name: string            # Tool name
-binary: string?         # Binary name (if different from name)
+binary: string?         # Binary name (if different)
 desc: string            # One-line description
-category: string        # Category path (e.g. "Files and Directories > Search")
+category: string        # e.g. "Files and Directories > Search"
 tags: [string]          # Search tags
 install:                # Install commands by package manager
   brew: string?
   cargo: string?
   npm: string?
 stars: number?          # GitHub stars
+brew_installs_30d: number?  # Homebrew annual installs
 links:
   repo: string?         # GitHub repository
   homepage: string?     # Project homepage
   docs: string?         # Documentation URL
-  llms_txt: string?     # llms.txt URL (LLM-readable docs)
+  llms_txt: string?     # llms.txt URL for LLM-readable docs
 ```
+
+## Data Sources
+
+Updated daily via GitHub Actions:
+
+- awesome-cli-apps (curated, ~473 tools)
+- toolleeo/cli-apps (structured CSV, ~2,200 tools)
+- Homebrew formulae (~8,200 packages)
+- Homebrew Cask (terminal emulators, GUI+CLI apps)
+- npm registry (CLI packages with bin field)
+- crates.io (Rust CLI tools)
+- GitHub API (stars, last updated)
+- Homebrew install-on-request analytics (popularity)
+
+## Search Algorithm
+
+BM25 + synonym expansion + popularity boost (GitHub stars, Homebrew installs) + nucleo fuzzy matching. Optional Model2Vec semantic search via Reciprocal Rank Fusion.
 
 ## Links
 
 - Repo: <https://github.com/syshin0116/clidex>
 - Crates.io: <https://crates.io/crates/clidex>
+- Index: <https://github.com/syshin0116/clidex/releases/download/index/index.yaml>
