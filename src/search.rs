@@ -186,9 +186,7 @@ fn intent_coverage(query_terms: &[&str], tool: &Tool) -> (f64, usize, usize) {
             if t.len() <= 2 {
                 // Short terms: only match against name, binary, or exact tag match
                 // (prevents false positives from short substrings in descriptions)
-                name_lower == tl
-                    || bin_lower == tl
-                    || tags_lower.iter().any(|tag| tag == &tl)
+                name_lower == tl || bin_lower == tl || tags_lower.iter().any(|tag| tag == &tl)
             } else {
                 searchable.contains(&tl)
             }
@@ -426,13 +424,10 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
         let has_anchor = tag_match
             || name_lower.contains(&query_lower)
             || query_lower.contains(&name_lower)
-            || tool
-                .binary
-                .as_ref()
-                .is_some_and(|b| {
-                    let bl = b.to_lowercase();
-                    bl.contains(&query_lower) || query_lower.contains(&bl)
-                });
+            || tool.binary.as_ref().is_some_and(|b| {
+                let bl = b.to_lowercase();
+                bl.contains(&query_lower) || query_lower.contains(&bl)
+            });
 
         let best_fuzzy = fuzzy_score.max(bin_score);
         if (best_fuzzy > fuzzy_threshold && has_anchor) || tag_match {
@@ -473,10 +468,8 @@ pub fn hybrid_search(
     // 1. BM25 search (already applies lexical threshold gate)
     let bm25_results = search(tools, query, max_results * 3);
     let has_lexical_confidence = !bm25_results.is_empty();
-    let bm25_ranked: Vec<(usize, f64)> = bm25_results
-        .iter()
-        .map(|r| (r.tool_idx, r.score))
-        .collect();
+    let bm25_ranked: Vec<(usize, f64)> =
+        bm25_results.iter().map(|r| (r.tool_idx, r.score)).collect();
 
     // 2. Semantic search — cosine similarity, filtered by minimum threshold
     let mut semantic_scores: Vec<(usize, f32)> = embeddings

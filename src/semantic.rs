@@ -25,10 +25,15 @@ pub fn load_embeddings(path: &Path) -> Result<Vec<Vec<f32>>, Box<dyn std::error:
 
     // Validate header values against safety limits
     if count > MAX_EMBEDDINGS_COUNT {
-        return Err(format!("Embeddings count {count} exceeds maximum {MAX_EMBEDDINGS_COUNT}").into());
+        return Err(
+            format!("Embeddings count {count} exceeds maximum {MAX_EMBEDDINGS_COUNT}").into(),
+        );
     }
     if dim == 0 || dim > MAX_EMBED_DIM {
-        return Err(format!("Embeddings dimension {dim} is invalid (expected 1..={MAX_EMBED_DIM})").into());
+        return Err(format!(
+            "Embeddings dimension {dim} is invalid (expected 1..={MAX_EMBED_DIM})"
+        )
+        .into());
     }
 
     // Validate file size matches header
@@ -36,7 +41,8 @@ pub fn load_embeddings(path: &Path) -> Result<Vec<Vec<f32>>, Box<dyn std::error:
     if file_len != expected_size {
         return Err(format!(
             "Embeddings file size mismatch: expected {expected_size} bytes, got {file_len}"
-        ).into());
+        )
+        .into());
     }
 
     let mut embeddings = Vec::with_capacity(count);
