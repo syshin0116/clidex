@@ -43,7 +43,13 @@ pub async fn update_index() -> Result<usize, String> {
         serde_yaml::from_str(&body).map_err(|e| format!("Invalid index data: {e}"))?;
 
     let path = config::index_path();
-    fs::write(&path, &body).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+
+    // Atomic write: write to temp file then rename to avoid corruption on interruption
+    let tmp_path = path.with_extension("yaml.tmp");
+    fs::write(&tmp_path, &body)
+        .map_err(|e| format!("Failed to write {}: {e}", tmp_path.display()))?;
+    fs::rename(&tmp_path, &path)
+        .map_err(|e| format!("Failed to rename temp file: {e}"))?;
 
     Ok(index.tools.len())
 }

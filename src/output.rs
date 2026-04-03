@@ -1,6 +1,16 @@
 use crate::model::Tool;
 use colored::Colorize;
 
+/// Truncate a string to `max_width` characters (not bytes), appending "…" if truncated.
+fn truncate_str(s: &str, max_width: usize) -> String {
+    if s.chars().count() > max_width {
+        let truncated: String = s.chars().take(max_width - 1).collect();
+        format!("{truncated}…")
+    } else {
+        s.to_string()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Format {
     Pretty,
@@ -107,11 +117,7 @@ fn print_compare_pretty(tools: &[Tool]) {
     // Description
     print!("{:label_width$}", "Description".dimmed().to_string());
     for tool in tools {
-        let desc = if tool.desc.len() > col_width {
-            format!("{}…", &tool.desc[..col_width - 1])
-        } else {
-            tool.desc.clone()
-        };
+        let desc = truncate_str(&tool.desc, col_width);
         print!("  {:col_width$}", desc);
     }
     println!();
@@ -146,11 +152,7 @@ fn print_compare_pretty(tools: &[Tool]) {
         } else {
             "—".to_string()
         };
-        let install = if install.len() > col_width {
-            format!("{}…", &install[..col_width - 1])
-        } else {
-            install
-        };
+        let install = truncate_str(&install, col_width);
         print!("  {:col_width$}", install.green().to_string());
     }
     println!();
@@ -171,11 +173,7 @@ fn print_compare_pretty(tools: &[Tool]) {
     print!("{:label_width$}", "Repo".dimmed().to_string());
     for tool in tools {
         let repo = tool.links.repo.as_deref().unwrap_or("—");
-        let repo = if repo.len() > col_width {
-            format!("{}…", &repo[..col_width - 1])
-        } else {
-            repo.to_string()
-        };
+        let repo = truncate_str(repo, col_width);
         print!("  {:col_width$}", repo.blue().to_string());
     }
     println!();

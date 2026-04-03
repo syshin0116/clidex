@@ -6,6 +6,8 @@ use std::collections::HashMap;
 pub struct SearchResult {
     pub tool: Tool,
     pub score: f64,
+    /// Index into the original tools slice (used by hybrid search)
+    pub tool_idx: usize,
 }
 
 /// Synonym map for CLI domain query expansion
@@ -307,6 +309,7 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
         scored.push(SearchResult {
             tool: tool.clone(),
             score: final_score,
+            tool_idx: idx,
         });
     }
 
@@ -352,6 +355,7 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
             scored.push(SearchResult {
                 tool: tool.clone(),
                 score: best_fuzzy as f64 * 0.3 + pop_boost + tag_bonus,
+                tool_idx: i,
             });
         }
     }
@@ -382,13 +386,7 @@ pub fn hybrid_search(
     let bm25_results = search(tools, query, max_results * 3);
     let bm25_ranked: Vec<(usize, f64)> = bm25_results
         .iter()
-        .map(|r| {
-            let idx = tools
-                .iter()
-                .position(|t| t.name == r.tool.name)
-                .unwrap_or(0);
-            (idx, r.score)
-        })
+        .map(|r| (r.tool_idx, r.score))
         .collect();
 
     // 2. Semantic search — cosine similarity for all tools
@@ -410,6 +408,7 @@ pub fn hybrid_search(
         .map(|(idx, score)| SearchResult {
             tool: tools[idx].clone(),
             score,
+            tool_idx: idx,
         })
         .collect()
 }

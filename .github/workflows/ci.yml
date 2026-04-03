@@ -27,11 +27,17 @@ jobs:
       - name: Check
         run: cargo check --all-targets
 
+      - name: Check (semantic feature)
+        run: cargo check --all-targets --features semantic
+
       - name: Test
         run: cargo test
 
       - name: Clippy
         run: cargo clippy -- -D warnings
+
+      - name: Clippy (semantic feature)
+        run: cargo clippy --features semantic -- -D warnings
 
       - name: Format check
         run: cargo fmt -- --check

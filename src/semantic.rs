@@ -8,7 +8,13 @@ pub const EMBED_DIM: usize = 64;
 
 /// Load embeddings from binary file
 /// Format: [u32 count][u32 dim][f32 * count * dim]
+/// Maximum number of embeddings to load (safety limit against corrupted headers)
+const MAX_EMBEDDINGS_COUNT: usize = 1_000_000;
+/// Maximum embedding dimension (safety limit)
+const MAX_EMBED_DIM: usize = 4096;
+
 pub fn load_embeddings(path: &Path) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+    let file_len = std::fs::metadata(path)?.len();
     let mut file = std::fs::File::open(path)?;
     let mut buf = [0u8; 4];
 
@@ -16,6 +22,22 @@ pub fn load_embeddings(path: &Path) -> Result<Vec<Vec<f32>>, Box<dyn std::error:
     let count = u32::from_le_bytes(buf) as usize;
     file.read_exact(&mut buf)?;
     let dim = u32::from_le_bytes(buf) as usize;
+
+    // Validate header values against safety limits
+    if count > MAX_EMBEDDINGS_COUNT {
+        return Err(format!("Embeddings count {count} exceeds maximum {MAX_EMBEDDINGS_COUNT}").into());
+    }
+    if dim == 0 || dim > MAX_EMBED_DIM {
+        return Err(format!("Embeddings dimension {dim} is invalid (expected 1..={MAX_EMBED_DIM})").into());
+    }
+
+    // Validate file size matches header
+    let expected_size = 8 + (count as u64) * (dim as u64) * 4;
+    if file_len != expected_size {
+        return Err(format!(
+            "Embeddings file size mismatch: expected {expected_size} bytes, got {file_len}"
+        ).into());
+    }
 
     let mut embeddings = Vec::with_capacity(count);
     for _ in 0..count {
