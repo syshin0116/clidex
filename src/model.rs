@@ -15,8 +15,12 @@ pub struct Tool {
     pub install: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stars: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub brew_installs_30d: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "brew_installs_30d"
+    )]
+    pub brew_installs_365d: Option<u64>,
     #[serde(default)]
     pub links: Links,
     #[serde(skip_serializing_if = "Option::is_none")]

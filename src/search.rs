@@ -122,31 +122,91 @@ const QUERY_NOISE: &[&str] = &[
     "using",
 ];
 
-/// Popularity boost using stars (primary) or brew install count (fallback)
+/// Minimum lexical score (BM25 + bonuses, excluding popularity) for a result to be included.
+/// Exact name/binary matches bypass this threshold.
+const MIN_LEXICAL_THRESHOLD: f64 = 2.0;
+
+/// Minimum semantic similarity for a result to be included in hybrid search.
+#[cfg(feature = "semantic")]
+const MIN_SEMANTIC_SIMILARITY: f32 = 0.3;
+
+/// Popularity boost using stars (primary) or brew install count (fallback).
+/// Max ~8.0 — acts as tie-breaker, not a primary ranking signal.
 fn popularity_boost(tool: &Tool) -> f64 {
     // Primary: GitHub stars
     if let Some(s) = tool.stars {
         if s > 0 {
             return match s {
-                s if s > 50000 => 20.0,
-                s if s > 10000 => 12.0 + 8.0 * (s as f64 - 10000.0) / 40000.0,
-                s if s > 1000 => 4.0 + 8.0 * (s as f64 - 1000.0) / 9000.0,
-                s => (s as f64 / 1000.0) * 4.0,
+                s if s > 50000 => 8.0,
+                s if s > 10000 => 5.0 + 3.0 * (s as f64 - 10000.0) / 40000.0,
+                s if s > 1000 => 2.0 + 3.0 * (s as f64 - 1000.0) / 9000.0,
+                s => (s as f64 / 1000.0) * 2.0,
             };
         }
     }
     // Fallback: Homebrew install-on-request (annual)
-    if let Some(installs) = tool.brew_installs_30d {
+    if let Some(installs) = tool.brew_installs_365d {
         if installs > 0 {
             return match installs {
-                i if i > 500000 => 18.0,
-                i if i > 100000 => 10.0 + 8.0 * (i as f64 - 100000.0) / 400000.0,
-                i if i > 10000 => 4.0 + 6.0 * (i as f64 - 10000.0) / 90000.0,
-                i => (i as f64 / 10000.0) * 4.0,
+                i if i > 500000 => 7.0,
+                i if i > 100000 => 4.0 + 3.0 * (i as f64 - 100000.0) / 400000.0,
+                i if i > 10000 => 2.0 + 2.0 * (i as f64 - 10000.0) / 90000.0,
+                i => (i as f64 / 10000.0) * 2.0,
             };
         }
     }
     0.5 // no popularity data — lower default
+}
+
+/// Compute intent coverage bonus based on how many query terms appear in
+/// the tool's name, binary, description, tags, and category.
+/// Returns (coverage_bonus, covered_count, total_checkable_terms).
+fn intent_coverage(query_terms: &[&str], tool: &Tool) -> (f64, usize, usize) {
+    if query_terms.is_empty() {
+        return (0.0, 0, 0);
+    }
+
+    let name_lower = tool.name.to_lowercase();
+    let bin_lower = tool
+        .binary
+        .as_ref()
+        .map(|b| b.to_lowercase())
+        .unwrap_or_default();
+    let desc_lower = tool.desc.to_lowercase();
+    let cat_lower = tool.category.to_lowercase();
+    let tags_lower: Vec<String> = tool.tags.iter().map(|t| t.to_lowercase()).collect();
+    let tags_joined = tags_lower.join(" ");
+
+    let searchable = format!("{name_lower} {bin_lower} {desc_lower} {cat_lower} {tags_joined}");
+
+    let covered = query_terms
+        .iter()
+        .filter(|t| {
+            let tl = t.to_lowercase();
+            if t.len() <= 2 {
+                // Short terms: only match against name, binary, or exact tag match
+                // (prevents false positives from short substrings in descriptions)
+                name_lower == tl
+                    || bin_lower == tl
+                    || tags_lower.iter().any(|tag| tag == &tl)
+            } else {
+                searchable.contains(&tl)
+            }
+        })
+        .count();
+    let total = query_terms.len();
+
+    let bonus = if covered == total {
+        // All terms covered → strong intent match
+        12.0
+    } else if total > 1 && covered > 0 {
+        // Partial coverage → proportional bonus
+        (covered as f64 / total as f64) * 6.0
+    } else {
+        0.0
+    };
+
+    (bonus, covered, total)
 }
 
 fn preprocess_query(query: &str) -> String {
@@ -249,6 +309,8 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
 
     let mut scored: Vec<SearchResult> = Vec::new();
 
+    let query_terms: Vec<&str> = query_for_search.split_whitespace().collect();
+
     for bm25_res in &bm25_results {
         let idx = bm25_res.document.id;
         let tool = &tools[idx];
@@ -270,7 +332,6 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
 
         // Description match bonus — reward when query terms appear directly in description
         let desc_lower = tool.desc.to_lowercase();
-        let query_terms: Vec<&str> = query_for_search.split_whitespace().collect();
         let desc_match_count = query_terms
             .iter()
             .filter(|t| t.len() > 2 && desc_lower.contains(&t.to_lowercase()))
@@ -302,10 +363,23 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
             }
         };
 
-        // Popularity boost (normalized 0-20) — uses stars, falls back to brew installs
+        // Intent coverage bonus — how well query terms are covered by the tool's metadata
+        let (intent_bonus, covered, _) = intent_coverage(&query_terms, tool);
+
+        // Lexical score: all relevance signals, excluding popularity
+        let lexical_score = bm25_score + name_bonus + cat_bonus + desc_bonus + intent_bonus;
+
+        // Gate: require minimum lexical evidence (exact name/binary matches bypass).
+        // Also require at least one query term to appear directly in tool metadata —
+        // this prevents BM25 false positives from tokenized garbage queries.
+        if name_bonus == 0.0 && (lexical_score < MIN_LEXICAL_THRESHOLD || covered == 0) {
+            continue;
+        }
+
+        // Popularity as tie-breaker only (max ~8)
         let pop_boost = popularity_boost(tool);
 
-        let final_score = bm25_score + name_bonus + cat_bonus + pop_boost + desc_bonus;
+        let final_score = lexical_score + pop_boost;
         scored.push(SearchResult {
             tool: tool.clone(),
             score: final_score,
@@ -348,8 +422,20 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
         // Exact tag match bonus (helps short queries like "rg", "fd")
         let tag_match = tool.tags.iter().any(|t| t == &query_lower);
 
+        // Anchor check: require at least one of these to prevent spurious fuzzy matches
+        let has_anchor = tag_match
+            || name_lower.contains(&query_lower)
+            || query_lower.contains(&name_lower)
+            || tool
+                .binary
+                .as_ref()
+                .is_some_and(|b| {
+                    let bl = b.to_lowercase();
+                    bl.contains(&query_lower) || query_lower.contains(&bl)
+                });
+
         let best_fuzzy = fuzzy_score.max(bin_score);
-        if best_fuzzy > fuzzy_threshold || tag_match {
+        if (best_fuzzy > fuzzy_threshold && has_anchor) || tag_match {
             let pop_boost = popularity_boost(tool);
             let tag_bonus = if tag_match { 20.0 } else { 0.0 };
             scored.push(SearchResult {
@@ -369,7 +455,9 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
     scored
 }
 
-/// Hybrid search combining BM25 + semantic similarity via RRF
+/// Hybrid search combining BM25 + semantic similarity via RRF.
+/// Uses per-channel confidence gates: at least one channel must have confident results
+/// for any results to be returned.
 #[cfg(feature = "semantic")]
 pub fn hybrid_search(
     tools: &[Tool],
@@ -382,21 +470,29 @@ pub fn hybrid_search(
         return search(tools, query, max_results);
     }
 
-    // 1. BM25 search (get more candidates for RRF)
+    // 1. BM25 search (already applies lexical threshold gate)
     let bm25_results = search(tools, query, max_results * 3);
+    let has_lexical_confidence = !bm25_results.is_empty();
     let bm25_ranked: Vec<(usize, f64)> = bm25_results
         .iter()
         .map(|r| (r.tool_idx, r.score))
         .collect();
 
-    // 2. Semantic search — cosine similarity for all tools
+    // 2. Semantic search — cosine similarity, filtered by minimum threshold
     let mut semantic_scores: Vec<(usize, f32)> = embeddings
         .iter()
         .enumerate()
         .map(|(i, emb)| (i, crate::semantic::cosine_similarity(query_embedding, emb)))
+        .filter(|(_, sim)| *sim >= MIN_SEMANTIC_SIMILARITY)
         .collect();
     semantic_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let has_semantic_confidence = !semantic_scores.is_empty();
     semantic_scores.truncate(max_results * 3);
+
+    // Gate: at least one channel must be confident
+    if !has_lexical_confidence && !has_semantic_confidence {
+        return vec![];
+    }
 
     // 3. RRF combination
     let combined = crate::semantic::rrf_combine(&bm25_ranked, &semantic_scores, tools.len(), 60.0);

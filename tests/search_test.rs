@@ -19,7 +19,7 @@ fn make_tool(
         tags: tags.iter().map(|s| s.to_string()).collect(),
         install: BTreeMap::new(),
         stars,
-        brew_installs_30d: None,
+        brew_installs_365d: None,
         links: Links::default(),
         last_updated: None,
     }
@@ -143,6 +143,44 @@ fn test_max_results() {
 fn test_empty_tools() {
     let results = search::search(&[], "anything", 10);
     assert!(results.is_empty());
+}
+
+// =================== Empty result / confidence gate tests ===================
+
+#[test]
+fn test_nonsense_query_returns_empty() {
+    let tools = sample_tools();
+
+    let r = search::search(&tools, "no-such-tool-name", 10);
+    assert!(
+        r.is_empty(),
+        "nonsense query should return empty, got {:?}",
+        r.iter().map(|x| &x.tool.name).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_random_string_returns_empty() {
+    let tools = sample_tools();
+
+    let r = search::search(&tools, "xyzzyplugh42", 10);
+    assert!(
+        r.is_empty(),
+        "random string should return empty, got {:?}",
+        r.iter().map(|x| &x.tool.name).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_gibberish_query_returns_empty() {
+    let tools = sample_tools();
+
+    let r = search::search(&tools, "aaabbbccc dddeeefff", 10);
+    assert!(
+        r.is_empty(),
+        "gibberish query should return empty, got {:?}",
+        r.iter().map(|x| &x.tool.name).collect::<Vec<_>>()
+    );
 }
 
 // =================== 30-query accuracy test ===================
@@ -282,9 +320,9 @@ fn test_hard_queries() {
         names
     );
 
-    // Q22: synonym "grep" -> "ripgrep"
+    // Q22: synonym "grep" -> "ripgrep" (should be top 1, not beaten by popularity)
     let r = search::search(&tools, "faster grep", 5);
-    assert_in_top_n(&r, "ripgrep", 5, "faster grep");
+    assert_in_top_n(&r, "ripgrep", 1, "faster grep");
 
     // Q23: synonym "man" -> "tldr"
     let r = search::search(&tools, "nicer way to read man pages", 5);
@@ -302,17 +340,17 @@ fn test_hard_queries() {
     let r = search::search(&tools, "something like htop", 5);
     assert_in_top_n(&r, "bottom", 5, "something like htop");
 
-    // Q27: synonym "navigate" + tag "cd"
+    // Q27: synonym "navigate" + tag "cd" (should be top 1)
     let r = search::search(&tools, "smart cd command", 5);
-    assert_in_top_n(&r, "zoxide", 5, "smart cd command");
+    assert_in_top_n(&r, "zoxide", 1, "smart cd command");
 
-    // Q28: tag "csv" + synonym "spreadsheet" -> "csv"
+    // Q28: tag "csv" + synonym "spreadsheet" -> "csv" (top 3 should have relevant tools)
     let r = search::search(&tools, "csv to json", 5);
-    let names: Vec<&str> = r.iter().take(5).map(|x| x.tool.name.as_str()).collect();
+    let top3: Vec<&str> = r.iter().take(3).map(|x| x.tool.name.as_str()).collect();
     assert!(
-        names.contains(&"miller") || names.contains(&"csvkit") || names.contains(&"jq"),
-        "csv to json: expected miller/csvkit/jq, got {:?}",
-        names
+        top3.contains(&"miller") || top3.contains(&"csvkit") || top3.contains(&"jq"),
+        "csv to json: expected miller/csvkit/jq in top 3, got {:?}",
+        top3
     );
 
     // Q29: tag "shell" + "prompt"
@@ -436,13 +474,13 @@ fn test_recall_summary() {
         ("better ls command", "eza", 5),
         ("git terminal ui", "lazygit", 3),
         ("compare text differences", "delta", 5),
-        ("faster grep", "ripgrep", 5),
+        ("faster grep", "ripgrep", 1),
         ("nicer way to read man pages", "tldr", 5),
         ("profile how long my script takes", "hyperfine", 5),
         ("interactively select from a list", "fzf", 5),
         ("something like htop", "bottom", 5),
-        ("smart cd command", "zoxide", 5),
-        ("csv to json", "miller", 5),
+        ("smart cd command", "zoxide", 1),
+        ("csv to json", "miller", 3),
         ("customize my shell prompt", "starship", 5),
         ("cat replacement with colors", "bat", 5),
         ("disk usage", "ncdu", 5),

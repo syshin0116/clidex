@@ -220,8 +220,8 @@ fn print_tool_detail_pretty(tool: &Tool) {
     if let Some(s) = tool.stars {
         println!("  {} {}", "Stars:".bold(), format!("{s}").yellow());
     }
-    if let Some(b) = tool.brew_installs_30d {
-        println!("  {} {}", "Brew installs (30d):".bold(), b);
+    if let Some(b) = tool.brew_installs_365d {
+        println!("  {} {}", "Brew installs (365d):".bold(), b);
     }
 
     if !tool.install.is_empty() {

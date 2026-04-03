@@ -142,7 +142,7 @@ fn parse_awesome_cli_apps(markdown: &str) -> Vec<Tool> {
                 tags,
                 install: BTreeMap::new(),
                 stars: None,
-                brew_installs_30d: None,
+                brew_installs_365d: None,
                 links: Links {
                     repo,
                     homepage,
@@ -257,7 +257,7 @@ fn parse_toolleeo_csv(apps_csv: &str, categories_csv: &str) -> Vec<Tool> {
             tags,
             install: BTreeMap::new(),
             stars: None,
-            brew_installs_30d: None,
+            brew_installs_365d: None,
             links: Links {
                 repo,
                 homepage: tool_homepage,
@@ -530,7 +530,7 @@ fn add_homebrew_cli_tools(existing: &mut Vec<Tool>, brew_data: &[BrewFormula]) {
                 tags,
                 install,
                 stars: None,
-                brew_installs_30d: None,
+                brew_installs_365d: None,
                 links: Links {
                     repo,
                     homepage,
@@ -1101,9 +1101,9 @@ fn deduplicate(tools: &mut Vec<Tool>) {
         if base.links.docs.is_none() {
             base.links.docs = other.links.docs;
         }
-        // Keep brew_installs_30d
-        if base.brew_installs_30d.is_none() {
-            base.brew_installs_30d = other.brew_installs_30d;
+        // Keep brew_installs_365d
+        if base.brew_installs_365d.is_none() {
+            base.brew_installs_365d = other.brew_installs_365d;
         }
     }
 
@@ -1407,7 +1407,7 @@ fn discover_from_homebrew(
             tags,
             install,
             stars: None,
-            brew_installs_30d: if installs > 0 { Some(installs) } else { None },
+            brew_installs_365d: if installs > 0 { Some(installs) } else { None },
             links: Links {
                 repo,
                 homepage,
@@ -1489,7 +1489,7 @@ fn discover_from_homebrew_casks(existing: &mut Vec<Tool>, cask_data: &[BrewCask]
             tags,
             install,
             stars: None,
-            brew_installs_30d: None,
+            brew_installs_365d: None,
             links: Links {
                 repo,
                 homepage,
@@ -1566,7 +1566,7 @@ async fn discover_from_npm(existing: &mut Vec<Tool>, client: &reqwest::Client) {
                     tags,
                     install,
                     stars: None,
-                    brew_installs_30d: None,
+                    brew_installs_365d: None,
                     links: Links {
                         repo: repo_url,
                         homepage,
@@ -1734,12 +1734,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Apply brew analytics to ALL tools (not just Homebrew-discovered ones)
     let mut analytics_applied = 0;
     for tool in tools.iter_mut() {
-        if tool.brew_installs_30d.is_none() {
+        if tool.brew_installs_365d.is_none() {
             if let Some(&count) = brew_analytics.get(&tool.name) {
-                tool.brew_installs_30d = Some(count);
+                tool.brew_installs_365d = Some(count);
                 analytics_applied += 1;
             } else if let Some(&count) = brew_analytics.get(&tool.name.to_lowercase()) {
-                tool.brew_installs_30d = Some(count);
+                tool.brew_installs_365d = Some(count);
                 analytics_applied += 1;
             }
         }

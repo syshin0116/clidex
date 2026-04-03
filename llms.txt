@@ -73,7 +73,7 @@ install:                # Install commands by package manager
   cargo: string?
   npm: string?
 stars: number?          # GitHub stars
-brew_installs_30d: number?  # Homebrew annual installs
+brew_installs_365d: number?  # Homebrew annual installs (365-day)
 links:
   repo: string?         # GitHub repository
   homepage: string?     # Project homepage
