@@ -18,6 +18,8 @@ const BREW_ANALYTICS_URL: &str =
     "https://formulae.brew.sh/api/analytics/install-on-request/365d.json";
 const HOMEBREW_CASK_URL: &str = "https://formulae.brew.sh/api/cask.json";
 const NPM_SEARCH_URL: &str = "https://registry.npmjs.org/-/v1/search";
+const CRATES_IO_API: &str = "https://crates.io/api/v1/crates";
+const PYPI_SEARCH_URL: &str = "https://pypi.org/pypi";
 
 #[derive(Debug, Deserialize)]
 struct BrewFormula {
@@ -1582,6 +1584,243 @@ async fn discover_from_npm(existing: &mut Vec<Tool>, client: &reqwest::Client) {
     eprintln!("Discovered {} CLI packages from npm", added);
 }
 
+/// Discover new CLI tools from crates.io by searching categories/keywords.
+/// Unlike enrich_with_crates_io (which adds `cargo install` to existing tools),
+/// this function discovers tools that aren't in the index yet.
+async fn discover_from_crates_io(existing: &mut Vec<Tool>, client: &reqwest::Client) {
+    let existing_names: std::collections::HashSet<String> =
+        existing.iter().map(|t| t.name.to_lowercase()).collect();
+
+    let categories = [
+        "command-line-utilities",
+        "command-line-interface",
+        "development-tools",
+        "filesystem",
+    ];
+    let mut added = 0;
+    let per_category = 25; // top 25 per category by downloads
+
+    for category in &categories {
+        let url = format!(
+            "{}?category={}&per_page={}&sort=downloads",
+            CRATES_IO_API, category, per_category
+        );
+        let resp = match client
+            .get(&url)
+            .header(
+                "User-Agent",
+                "clidex-build/0.2 (https://github.com/syshin0116/clidex)",
+            )
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) if r.status().as_u16() == 429 => {
+                eprintln!("crates.io discovery: rate limited at category {}", category);
+                break;
+            }
+            _ => continue,
+        };
+
+        let data: serde_json::Value = match resp.json().await {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        if let Some(crates) = data["crates"].as_array() {
+            for krate in crates {
+                let name = match krate["id"].as_str() {
+                    Some(n) => n,
+                    None => continue,
+                };
+
+                // Use the crate name as display name, skip if already exists
+                if existing_names.contains(&name.to_lowercase()) {
+                    continue;
+                }
+
+                let desc = krate["description"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string()
+                    .replace('\n', " ");
+                if desc.is_empty() {
+                    continue;
+                }
+
+                // Skip library-only crates (heuristic: description mentions "library" or "crate")
+                let desc_lower = desc.to_lowercase();
+                if (desc_lower.contains("library") || desc_lower.contains(" crate "))
+                    && !desc_lower.contains("tool")
+                    && !desc_lower.contains("cli")
+                    && !desc_lower.contains("command")
+                {
+                    continue;
+                }
+
+                let repo = krate["repository"].as_str().map(String::from);
+                let homepage = krate["homepage"].as_str().map(String::from);
+                let downloads = krate["downloads"].as_u64().unwrap_or(0);
+
+                // Skip low-download crates
+                if downloads < 10000 {
+                    continue;
+                }
+
+                let category_str = auto_categorize(&desc, name);
+                let tags = generate_tags(name, &desc, &category_str);
+
+                let mut install = BTreeMap::new();
+                install.insert("cargo".to_string(), format!("cargo install {}", name));
+
+                existing.push(Tool {
+                    name: name.to_string(),
+                    binary: None,
+                    desc,
+                    category: category_str,
+                    tags,
+                    install,
+                    stars: None,
+                    brew_installs_365d: None,
+                    links: Links {
+                        repo,
+                        homepage,
+                        docs: None,
+                        llms_txt: None,
+                    },
+                    last_updated: None,
+                });
+                added += 1;
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+    eprintln!("Discovered {} new CLI tools from crates.io", added);
+}
+
+/// Discover CLI tools from PyPI.
+/// Uses a seed list of well-known Python CLI tools + searches for popular console_scripts packages.
+async fn discover_from_pypi(existing: &mut Vec<Tool>, client: &reqwest::Client) {
+    let existing_names: std::collections::HashSet<String> =
+        existing.iter().map(|t| t.name.to_lowercase()).collect();
+
+    // Seed list: popular Python CLI tools that might not be in other sources
+    let seed_tools: &[(&str, &str)] = &[
+        ("uv", "uv"),
+        ("ruff", "ruff"),
+        ("mypy", "mypy"),
+        ("pytest", "pytest"),
+        ("tox", "tox"),
+        ("pre-commit", "pre-commit"),
+        ("cookiecutter", "cookiecutter"),
+        ("rich-cli", "rich-cli"),
+        ("textual", "textual"),
+        ("litecli", "litecli"),
+        ("mycli", "mycli"),
+        ("iredis", "iredis"),
+        ("ranger-fm", "ranger-fm"),
+        ("thefuck", "thefuck"),
+        ("howdoi", "howdoi"),
+        ("asciinema", "asciinema"),
+        ("ansible", "ansible"),
+        ("httpx", "httpx"),
+        ("supervisor", "supervisor"),
+        ("twine", "twine"),
+        ("bandit", "bandit"),
+        ("flake8", "flake8"),
+        ("isort", "isort"),
+        ("pylint", "pylint"),
+        ("sphinx", "sphinx"),
+        ("mkdocs", "mkdocs"),
+        ("jupyterlab", "jupyterlab"),
+        ("streamlit", "streamlit"),
+        ("dvc", "dvc"),
+        ("copier", "copier"),
+        ("nox", "nox"),
+        ("pdm", "pdm"),
+        ("hatch", "hatch"),
+        ("maturin", "maturin"),
+        ("bpython", "bpython"),
+        ("ptpython", "ptpython"),
+        ("grip", "grip"),
+        ("dooit", "dooit"),
+        ("posting", "posting"),
+    ];
+
+    let mut added = 0;
+
+    for (name, pypi_name) in seed_tools {
+        if existing_names.contains(&name.to_lowercase()) {
+            continue;
+        }
+
+        let url = format!("{}/{}/json", PYPI_SEARCH_URL, pypi_name);
+        let resp = match client.get(&url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => continue,
+        };
+
+        let data: serde_json::Value = match resp.json().await {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let info = &data["info"];
+        let desc = info["summary"].as_str().unwrap_or("").to_string();
+        if desc.is_empty() {
+            continue;
+        }
+
+        let homepage = info["home_page"]
+            .as_str()
+            .filter(|h| !h.is_empty())
+            .map(String::from);
+        let project_url = info["project_url"].as_str().map(String::from);
+        let repo = info["project_urls"]["Source"]
+            .as_str()
+            .or_else(|| info["project_urls"]["Repository"].as_str())
+            .or_else(|| info["project_urls"]["GitHub"].as_str())
+            .or_else(|| info["project_urls"]["Homepage"].as_str())
+            .map(String::from)
+            .or_else(|| {
+                homepage
+                    .as_ref()
+                    .filter(|h| h.contains("github.com"))
+                    .cloned()
+            });
+
+        let category = auto_categorize(&desc, name);
+        let tags = generate_tags(name, &desc, &category);
+
+        let mut install = BTreeMap::new();
+        install.insert("pipx".to_string(), format!("pipx install {}", pypi_name));
+
+        existing.push(Tool {
+            name: name.to_string(),
+            binary: None,
+            desc,
+            category,
+            tags,
+            install,
+            stars: None,
+            brew_installs_365d: None,
+            links: Links {
+                repo,
+                homepage: homepage.or(project_url),
+                docs: None,
+                llms_txt: None,
+            },
+            last_updated: None,
+        });
+        added += 1;
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+
+    eprintln!("Discovered {} new CLI tools from PyPI", added);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder()
@@ -1765,6 +2004,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 2c: Discover CLI packages from npm
     eprintln!("Discovering popular CLI packages from npm...");
     discover_from_npm(&mut tools, &client).await;
+
+    // Step 2d: Discover CLI tools from crates.io (new tools, not just enrichment)
+    eprintln!("Discovering CLI tools from crates.io categories...");
+    discover_from_crates_io(&mut tools, &client).await;
+
+    // Step 2e: Discover CLI tools from PyPI
+    eprintln!("Discovering CLI tools from PyPI...");
+    discover_from_pypi(&mut tools, &client).await;
 
     // Deduplicate
     deduplicate(&mut tools);

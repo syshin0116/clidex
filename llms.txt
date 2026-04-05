@@ -72,6 +72,7 @@ install:                # Install commands by package manager
   brew: string?
   cargo: string?
   npm: string?
+  pipx: string?
 stars: number?          # GitHub stars
 brew_installs_365d: number?  # Homebrew annual installs (365-day)
 links:
@@ -90,13 +91,14 @@ Updated daily via GitHub Actions:
 - Homebrew formulae (~8,200 packages)
 - Homebrew Cask (terminal emulators, GUI+CLI apps)
 - npm registry (CLI packages with bin field)
-- crates.io (Rust CLI tools)
+- crates.io (Rust CLI tools + category-based discovery)
+- PyPI (Python CLI tools via pipx)
 - GitHub API (stars, last updated)
 - Homebrew install-on-request analytics (popularity)
 
 ## Search Algorithm
 
-BM25 + synonym expansion + popularity boost (GitHub stars, Homebrew installs) + nucleo fuzzy matching. Optional Model2Vec semantic search via Reciprocal Rank Fusion.
+BM25 with field weighting + synonym expansion (30+ groups) + intent coverage scoring + popularity boost (GitHub stars, Homebrew installs) + fuzzy matching (nucleo subsequence + edit distance for typo correction) + confidence gates. Optional Model2Vec semantic search via Reciprocal Rank Fusion.
 
 ## Links
 

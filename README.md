@@ -185,6 +185,7 @@ install:                # Install commands by package manager
   brew: string?
   cargo: string?
   npm: string?
+  pipx: string?
 stars: number?          # GitHub stars
 links:
   repo: string?         # GitHub repository
@@ -202,11 +203,13 @@ The `llms_txt` field is especially useful — it points to [llms.txt](https://ll
 Clidex uses **BM25** text search with domain-specific optimizations:
 
 - **Field weighting**: Tool name (3x) > tags + category (2x) > description (1x)
-- **Synonym expansion**: `grep` → also matches `search`, `find`, `ripgrep`, `rg`
-- **Category boost**: Query terms matching category names get +8 points each
-- **Popularity boost**: GitHub stars add 0–10 bonus points
-- **Fuzzy matching**: Catches typos and partial name matches
+- **Synonym expansion**: `grep` → also matches `search`, `find`, `ripgrep`, `rg` (30+ synonym groups)
+- **Intent coverage**: Bonuses based on how many query terms appear in tool metadata
+- **Category boost**: Query terms matching category names get boosted
+- **Popularity boost**: GitHub stars or Homebrew install counts add 0–8 bonus points (tie-breaker, not primary signal)
+- **Fuzzy matching**: Catches typos via edit distance (`ripgrpe` → `ripgrep`) and subsequence matching
 - **Alias mapping**: `rg` → ripgrep, `btm` → bottom, `z` → zoxide (24 pairs)
+- **Confidence gates**: Minimum lexical evidence required to prevent false positives from garbage queries
 
 Search performance: **~3ms per query** on the full 440-tool index.
 
@@ -214,15 +217,21 @@ Search performance: **~3ms per query** on the full 440-tool index.
 
 ## Data sources
 
-| Source | What it provides | Count |
-|--------|-----------------|-------|
-| [awesome-cli-apps](https://github.com/agarrharr/awesome-cli-apps) | Curated tool list with categories | 427 tools |
-| [Homebrew](https://formulae.brew.sh/) | `brew install` commands + popular CLI tools | 186 matched + 15 added |
-| [GitHub API](https://docs.github.com/en/rest) | Stars, last updated, homepage | Metadata |
-| [crates.io](https://crates.io/) | `cargo install` commands | 42 tools |
-| [npm](https://www.npmjs.com/) | `npm install -g` commands | 12 tools |
+| Source | What it provides |
+|--------|-----------------|
+| [awesome-cli-apps](https://github.com/agarrharr/awesome-cli-apps) | Curated tool list with categories |
+| [toolleeo/cli-apps](https://github.com/toolleeo/cli-apps) | 2,200+ tools from CSV |
+| [modern-unix](https://github.com/ibraheemdev/modern-unix) | Modern replacements for classic tools |
+| [awesome-tuis](https://github.com/rothgar/awesome-tuis) | Terminal UI applications |
+| [Homebrew](https://formulae.brew.sh/) | `brew install` commands, formulae + casks |
+| [GitHub API](https://docs.github.com/en/rest) | Stars, last updated, homepage |
+| [crates.io](https://crates.io/) | `cargo install` commands + category-based discovery |
+| [npm](https://www.npmjs.com/) | `npm install -g` commands |
+| [PyPI](https://pypi.org/) | `pipx install` commands for Python CLI tools |
+| [Homebrew analytics](https://formulae.brew.sh/analytics/) | 365-day install counts |
+| [llms.txt](https://llmstxt.org/) | LLM-readable documentation probing |
 
-The index is rebuilt weekly via GitHub Actions and published as a [release asset](https://github.com/syshin0116/clidex/releases/tag/index).
+The index is rebuilt daily via GitHub Actions and published as a [release asset](https://github.com/syshin0116/clidex/releases/tag/index).
 
 ---
 

@@ -25,9 +25,10 @@ fn make_tool(
     }
 }
 
-/// 20 real CLI tools with realistic tags (simulating LLM-generated tags)
+/// 20 real CLI tools + adversarial near-miss competitors for ranking tests.
 fn sample_tools() -> Vec<Tool> {
     vec![
+        // === Core tools ===
         make_tool("jq", None, "Command-line JSON processor", "Data Processing",
             &["json", "filter", "transform", "parse", "query", "pipe", "structured-data"],
             Some(30500)),
@@ -88,6 +89,39 @@ fn sample_tools() -> Vec<Tool> {
         make_tool("zoxide", None, "Smarter cd command", "Navigation",
             &["cd", "directory", "jump", "autojump", "navigate", "frecent", "z"],
             Some(22000)),
+
+        // === Adversarial near-miss competitors (for ranking precision) ===
+        // ag competes with ripgrep for "grep" queries
+        make_tool("ag", None, "The Silver Searcher - code searching tool similar to ack", "Search",
+            &["search", "grep", "code-search", "ack", "find-in-files"],
+            Some(26000)),
+        // dasel + yq compete with jq for JSON/YAML queries
+        make_tool("dasel", None, "Select, put and delete data from JSON, TOML, YAML, XML and CSV", "Data Processing",
+            &["json", "yaml", "toml", "xml", "csv", "query", "select", "jq-alternative"],
+            Some(5300)),
+        make_tool("yq", None, "YAML processor - jq wrapper for YAML", "Data Processing",
+            &["yaml", "json", "query", "jq", "transform", "filter"],
+            Some(12000)),
+        // gitui competes with lazygit
+        make_tool("gitui", None, "Blazing fast terminal-ui for git", "Git",
+            &["git", "tui", "commit", "branch", "diff", "ui", "terminal"],
+            Some(18000)),
+        // difftastic competes with delta for diff
+        make_tool("difftastic", Some("difft"), "Structural diff tool that compares files based on their syntax", "Git",
+            &["diff", "syntax", "compare", "structural", "git"],
+            Some(21000)),
+        // lsd competes with eza for ls
+        make_tool("lsd", None, "The next gen ls command", "File Management",
+            &["ls", "list", "directory", "files", "icons", "colors"],
+            Some(13500)),
+        // navi competes with tldr for help
+        make_tool("navi", None, "Interactive cheatsheet tool for the command-line", "Help",
+            &["cheatsheet", "help", "reference", "snippets", "interactive"],
+            Some(15000)),
+        // curlie competes with httpie
+        make_tool("curlie", None, "Power of curl, ease of use of httpie", "HTTP",
+            &["http", "api", "curl", "request", "client", "rest"],
+            Some(2800)),
     ]
 }
 
@@ -113,7 +147,7 @@ fn test_binary_name_match() {
 fn test_category_filter() {
     let tools = sample_tools();
     let filtered = search::filter_by_category(&tools, "Data Processing");
-    assert_eq!(filtered.len(), 3);
+    assert_eq!(filtered.len(), 5); // jq, miller, csvkit, dasel, yq
     assert_eq!(filtered[0].name, "jq"); // highest stars
 }
 
@@ -202,6 +236,30 @@ fn assert_in_top_n(results: &[search::SearchResult], expected: &str, n: usize, q
     );
 }
 
+/// Helper: check that tool A ranks above tool B
+fn assert_ranks_above(results: &[search::SearchResult], higher: &str, lower: &str, query: &str) {
+    let pos_higher = results.iter().position(|r| r.tool.name == higher);
+    let pos_lower = results.iter().position(|r| r.tool.name == lower);
+    match (pos_higher, pos_lower) {
+        (Some(h), Some(l)) => assert!(
+            h < l,
+            "Query '{}': '{}' (#{}) should rank above '{}' (#{})",
+            query,
+            higher,
+            h + 1,
+            lower,
+            l + 1
+        ),
+        (None, _) => panic!(
+            "Query '{}': '{}' not found in results {:?}",
+            query,
+            higher,
+            results.iter().map(|r| &r.tool.name).collect::<Vec<_>>()
+        ),
+        _ => {} // lower not in results is fine
+    }
+}
+
 #[test]
 fn test_easy_queries() {
     let tools = sample_tools();
@@ -261,50 +319,52 @@ fn test_easy_queries() {
 fn test_medium_queries() {
     let tools = sample_tools();
 
-    // Q11: synonym "search" -> "find"
-    let r = search::search(&tools, "search files by name", 5);
-    assert_in_top_n(&r, "fd", 5, "search files by name");
+    // Q11: "find files" -> fd (more specific than "search files")
+    let r = search::search(&tools, "find files by name", 5);
+    assert_in_top_n(&r, "fd", 3, "find files by name");
 
     // Q12: tag "pretty-print"
     let r = search::search(&tools, "pretty print file", 5);
-    assert_in_top_n(&r, "bat", 5, "pretty print file");
+    assert_in_top_n(&r, "bat", 3, "pretty print file");
 
     // Q13: tag "lines-of-code" + "count"
     let r = search::search(&tools, "count lines of code", 5);
-    assert_in_top_n(&r, "tokei", 5, "count lines of code");
+    assert_in_top_n(&r, "tokei", 3, "count lines of code");
 
-    // Q14: synonym "http" + "request"
+    // Q14: synonym "http" + "request" — both httpie and curlie are valid
     let r = search::search(&tools, "make http requests", 5);
-    assert_in_top_n(&r, "httpie", 5, "make http requests");
+    assert_in_top_n(&r, "httpie", 3, "make http requests");
+    assert_in_top_n(&r, "curlie", 3, "make http requests");
 
     // Q15: synonym "navigate" -> "cd", "directory"
     let r = search::search(&tools, "navigate directories quickly", 5);
-    assert_in_top_n(&r, "zoxide", 5, "navigate directories quickly");
+    assert_in_top_n(&r, "zoxide", 3, "navigate directories quickly");
 
-    // Q16: description keywords
+    // Q16: description keywords — miller/csvkit should beat dasel
     let r = search::search(&tools, "csv data processing", 5);
-    let names: Vec<&str> = r.iter().take(5).map(|x| x.tool.name.as_str()).collect();
+    assert_in_top_n(&r, "miller", 3, "csv data processing");
+
+    // Q17: exact + description — tldr should beat navi
+    let r = search::search(&tools, "tldr pages", 5);
+    assert_in_top_n(&r, "tldr", 1, "tldr pages");
+
+    // Q18: tag "ls" — eza should compete with lsd
+    let r = search::search(&tools, "better ls command", 5);
+    let names: Vec<&str> = r.iter().take(3).map(|x| x.tool.name.as_str()).collect();
     assert!(
-        names.contains(&"miller") || names.contains(&"csvkit"),
-        "csv data processing: expected miller or csvkit, got {:?}",
+        names.contains(&"eza") || names.contains(&"lsd"),
+        "better ls command: expected eza or lsd in top 3, got {:?}",
         names
     );
 
-    // Q17: exact + description
-    let r = search::search(&tools, "tldr pages", 5);
-    assert_in_top_n(&r, "tldr", 3, "tldr pages");
-
-    // Q18: tag "ls"
-    let r = search::search(&tools, "better ls command", 5);
-    assert_in_top_n(&r, "eza", 5, "better ls command");
-
-    // Q19: description keywords
+    // Q19: description keywords — lazygit should beat gitui
     let r = search::search(&tools, "git terminal ui", 5);
     assert_in_top_n(&r, "lazygit", 3, "git terminal ui");
+    assert_ranks_above(&r, "lazygit", "gitui", "git terminal ui");
 
     // Q20: synonym "compare" -> "diff"
     let r = search::search(&tools, "compare text differences", 5);
-    assert_in_top_n(&r, "delta", 5, "compare text differences");
+    assert_in_top_n(&r, "delta", 3, "compare text differences");
 }
 
 #[test]
@@ -320,13 +380,15 @@ fn test_hard_queries() {
         names
     );
 
-    // Q22: synonym "grep" -> "ripgrep" (should be top 1, not beaten by popularity)
+    // Q22: synonym "grep" -> "ripgrep" should beat ag
     let r = search::search(&tools, "faster grep", 5);
     assert_in_top_n(&r, "ripgrep", 1, "faster grep");
+    assert_ranks_above(&r, "ripgrep", "ag", "faster grep");
 
-    // Q23: synonym "man" -> "tldr"
+    // Q23: synonym "man" -> "tldr" should beat navi
     let r = search::search(&tools, "nicer way to read man pages", 5);
-    assert_in_top_n(&r, "tldr", 5, "nicer way to read man pages");
+    assert_in_top_n(&r, "tldr", 3, "nicer way to read man pages");
+    assert_ranks_above(&r, "tldr", "navi", "nicer way to read man pages");
 
     // Q24: synonym "profile" -> "benchmark"
     let r = search::search(&tools, "profile how long my script takes", 5);
@@ -380,6 +442,44 @@ fn test_hard_queries() {
     // Q30: synonym "cat" -> "bat"
     let r = search::search(&tools, "cat replacement with colors", 5);
     assert_in_top_n(&r, "bat", 5, "cat replacement with colors");
+}
+
+// =================== Typo correction tests ===================
+
+#[test]
+fn test_typo_queries() {
+    let tools = sample_tools();
+
+    // Typo: "ripgrpe" -> should find "ripgrep" in top 3
+    let r = search::search(&tools, "ripgrpe", 5);
+    assert_in_top_n(&r, "ripgrep", 3, "ripgrpe (typo)");
+
+    // Typo: "zoxdie" -> should find "zoxide" in top 3
+    let r = search::search(&tools, "zoxdie", 5);
+    assert_in_top_n(&r, "zoxide", 3, "zoxdie (typo)");
+
+    // Typo: "lazigit" -> should find "lazygit" in top 3
+    let r = search::search(&tools, "lazigit", 5);
+    assert_in_top_n(&r, "lazygit", 3, "lazigit (typo)");
+}
+
+// =================== Synonym-only match tests ===================
+
+#[test]
+fn test_synonym_only_queries() {
+    let tools = sample_tools();
+
+    // "manual pages" -> tldr in top 3
+    let r = search::search(&tools, "manual pages", 5);
+    assert_in_top_n(&r, "tldr", 3, "manual pages (synonym-only)");
+
+    // "grep files" -> ripgrep in top 3, should beat ag
+    let r = search::search(&tools, "grep files", 5);
+    assert_in_top_n(&r, "ripgrep", 3, "grep files (synonym-only)");
+
+    // "navigate quickly" -> zoxide in top 3
+    let r = search::search(&tools, "navigate quickly", 5);
+    assert_in_top_n(&r, "zoxide", 3, "navigate quickly (synonym-only)");
 }
 
 // =================== Performance benchmark ===================
@@ -457,25 +557,28 @@ fn test_recall_summary() {
 
     let test_cases: Vec<(&str, &str, usize)> = vec![
         // (query, expected_tool, top_n)
+        // --- Exact / basic ---
         ("jq", "jq", 1),
-        ("json processor", "jq", 3),
         ("ripgrep", "ripgrep", 1),
+        ("bat", "bat", 1),
+        ("json processor", "jq", 3),
         ("fuzzy finder", "fzf", 3),
         ("git diff viewer", "delta", 3),
-        ("bat", "bat", 1),
         ("dns lookup", "dog", 3),
         ("benchmark command line", "hyperfine", 3),
-        ("search files by name", "fd", 5),
-        ("pretty print file", "bat", 5),
-        ("count lines of code", "tokei", 5),
-        ("make http requests", "httpie", 5),
-        ("navigate directories quickly", "zoxide", 5),
-        ("csv data processing", "miller", 5),
-        ("better ls command", "eza", 5),
+        ("tldr pages", "tldr", 1),
+        // --- Medium (tighter than before) ---
+        ("find files by name", "fd", 3),
+        ("pretty print file", "bat", 3),
+        ("count lines of code", "tokei", 3),
+        ("make http requests", "httpie", 3),
+        ("navigate directories quickly", "zoxide", 3),
+        ("csv data processing", "miller", 3),
         ("git terminal ui", "lazygit", 3),
-        ("compare text differences", "delta", 5),
+        ("compare text differences", "delta", 3),
+        // --- Hard ---
         ("faster grep", "ripgrep", 1),
-        ("nicer way to read man pages", "tldr", 5),
+        ("nicer way to read man pages", "tldr", 3),
         ("profile how long my script takes", "hyperfine", 5),
         ("interactively select from a list", "fzf", 5),
         ("something like htop", "bottom", 5),
@@ -485,8 +588,14 @@ fn test_recall_summary() {
         ("cat replacement with colors", "bat", 5),
         ("disk usage", "ncdu", 5),
         ("process monitor", "procs", 5),
-        ("tldr pages", "tldr", 3),
-        ("git terminal ui", "lazygit", 3),
+        // --- Typo (top 3) ---
+        ("ripgrpe", "ripgrep", 3),
+        ("zoxdie", "zoxide", 3),
+        ("lazigit", "lazygit", 3),
+        // --- Synonym-only (top 3) ---
+        ("manual pages", "tldr", 3),
+        ("grep files", "ripgrep", 3),
+        ("navigate quickly", "zoxide", 3),
     ];
 
     let mut pass = 0;
@@ -519,10 +628,10 @@ fn test_recall_summary() {
         }
     }
 
-    // Target: >= 85% recall
+    // Target: >= 95% recall (stricter now with adversarial fixtures)
     assert!(
-        recall >= 85.0,
-        "Recall too low: {:.1}% (target >= 85%)",
+        recall >= 95.0,
+        "Recall too low: {:.1}% (target >= 95%)",
         recall
     );
 }

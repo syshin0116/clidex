@@ -3,6 +3,30 @@ use bm25::{Document, Language, SearchEngineBuilder, SearchResult as BM25Result};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use std::collections::HashMap;
 
+/// Simple Levenshtein (edit) distance for typo detection.
+/// Handles transpositions that subsequence matchers like nucleo miss.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (m, n) = (a.len(), b.len());
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+    for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
+        row[0] = i;
+    }
+    for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) {
+        *val = j;
+    }
+    for i in 1..=m {
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
+        }
+    }
+    dp[m][n]
+}
+
 pub struct SearchResult {
     pub tool: Tool,
     pub score: f64,
@@ -158,9 +182,30 @@ fn popularity_boost(tool: &Tool) -> f64 {
     0.5 // no popularity data — lower default
 }
 
+/// Check if a term matches within text at a word boundary.
+/// Returns true if `term` appears in `text` as a complete token or prefix of a token.
+fn word_boundary_match(text: &str, term: &str) -> bool {
+    for word in text.split(|c: char| !c.is_alphanumeric() && c != '-') {
+        if word.is_empty() {
+            continue;
+        }
+        let w = word.to_lowercase();
+        if w == term || w.starts_with(term) || term.starts_with(&w) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Compute intent coverage bonus based on how many query terms appear in
 /// the tool's name, binary, description, tags, and category.
 /// Returns (coverage_bonus, covered_count, total_checkable_terms).
+///
+/// Uses token-aware matching:
+/// - name/binary: exact match
+/// - tags: exact or prefix match
+/// - category: prefix match (stemming-like)
+/// - description: word-boundary match (not raw substring)
 fn intent_coverage(query_terms: &[&str], tool: &Tool) -> (f64, usize, usize) {
     if query_terms.is_empty() {
         return (0.0, 0, 0);
@@ -175,20 +220,28 @@ fn intent_coverage(query_terms: &[&str], tool: &Tool) -> (f64, usize, usize) {
     let desc_lower = tool.desc.to_lowercase();
     let cat_lower = tool.category.to_lowercase();
     let tags_lower: Vec<String> = tool.tags.iter().map(|t| t.to_lowercase()).collect();
-    let tags_joined = tags_lower.join(" ");
-
-    let searchable = format!("{name_lower} {bin_lower} {desc_lower} {cat_lower} {tags_joined}");
 
     let covered = query_terms
         .iter()
         .filter(|t| {
             let tl = t.to_lowercase();
-            if t.len() <= 2 {
+            if tl.len() <= 2 {
                 // Short terms: only match against name, binary, or exact tag match
                 // (prevents false positives from short substrings in descriptions)
                 name_lower == tl || bin_lower == tl || tags_lower.iter().any(|tag| tag == &tl)
             } else {
-                searchable.contains(&tl)
+                // Token-aware matching per field:
+                // 1. Name/binary: exact match
+                name_lower == tl
+                    || bin_lower == tl
+                    // 2. Tags: exact or prefix match
+                    || tags_lower
+                        .iter()
+                        .any(|tag| tag == &tl || tag.starts_with(&tl) || tl.starts_with(tag.as_str()))
+                    // 3. Category: word-boundary prefix match
+                    || word_boundary_match(&cat_lower, &tl)
+                    // 4. Description: word-boundary match
+                    || word_boundary_match(&desc_lower, &tl)
             }
         })
         .count();
@@ -308,6 +361,14 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
     let mut scored: Vec<SearchResult> = Vec::new();
 
     let query_terms: Vec<&str> = query_for_search.split_whitespace().collect();
+    // Collect synonym-expanded terms for coverage gate (so synonym-only matches aren't killed)
+    let expanded_terms: Vec<String> = expanded
+        .split_whitespace()
+        .map(|s| s.to_lowercase())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let expanded_term_refs: Vec<&str> = expanded_terms.iter().map(|s| s.as_str()).collect();
 
     for bm25_res in &bm25_results {
         let idx = bm25_res.document.id;
@@ -328,11 +389,11 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
             0.0
         };
 
-        // Description match bonus — reward when query terms appear directly in description
+        // Description match bonus — reward when query terms appear at word boundaries
         let desc_lower = tool.desc.to_lowercase();
         let desc_match_count = query_terms
             .iter()
-            .filter(|t| t.len() > 2 && desc_lower.contains(&t.to_lowercase()))
+            .filter(|t| t.len() > 2 && word_boundary_match(&desc_lower, &t.to_lowercase()))
             .count();
         let desc_bonus = desc_match_count as f64 * 5.0;
 
@@ -364,13 +425,24 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
         // Intent coverage bonus — how well query terms are covered by the tool's metadata
         let (intent_bonus, covered, _) = intent_coverage(&query_terms, tool);
 
+        // Synonym coverage: gate + weak scoring bonus for synonym-only matches
+        let (syn_intent_bonus, syn_covered) = if covered == 0 {
+            let (sb, sc, _) = intent_coverage(&expanded_term_refs, tool);
+            // Half weight for synonym-derived intent bonus
+            (sb * 0.5, sc)
+        } else {
+            (0.0, covered)
+        };
+
         // Lexical score: all relevance signals, excluding popularity
-        let lexical_score = bm25_score + name_bonus + cat_bonus + desc_bonus + intent_bonus;
+        let lexical_score =
+            bm25_score + name_bonus + cat_bonus + desc_bonus + intent_bonus + syn_intent_bonus;
 
         // Gate: require minimum lexical evidence (exact name/binary matches bypass).
-        // Also require at least one query term to appear directly in tool metadata —
-        // this prevents BM25 false positives from tokenized garbage queries.
-        if name_bonus == 0.0 && (lexical_score < MIN_LEXICAL_THRESHOLD || covered == 0) {
+        // Also require at least one query term (or its synonym) to appear in tool metadata —
+        // this prevents BM25 false positives from tokenized garbage queries,
+        // while allowing synonym-only matches through.
+        if name_bonus == 0.0 && (lexical_score < MIN_LEXICAL_THRESHOLD || syn_covered == 0) {
             continue;
         }
 
@@ -391,6 +463,12 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
 
     // For short queries, require higher fuzzy threshold to avoid false positives
     let fuzzy_threshold = if query_lower.len() <= 3 { 80 } else { 50 };
+    // High-confidence fuzzy threshold: allows typo matches without anchor
+    // (e.g. "ripgrpe" -> "ripgrep", "zoxdie" -> "zoxide")
+    let fuzzy_high_confidence = if query_lower.len() <= 3 { 200 } else { 120 };
+    // Edit distance is only useful for single-word queries (tool name typos).
+    // Multi-word queries like "csv to json" should never trigger edit distance.
+    let is_single_word_query = !query_lower.contains(' ');
 
     let mut hay_buf = Vec::new();
     for (i, tool) in tools.iter().enumerate() {
@@ -417,6 +495,43 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
             })
             .unwrap_or(0);
 
+        // Edit distance for typo detection (catches transpositions that nucleo misses)
+        // Only for single-word queries (tool name typos, not multi-word searches)
+        // Early bailouts: skip for short queries, skip when length difference is too large
+        let qlen = query_lower.len();
+        let max_edit = if !is_single_word_query {
+            0
+        } else if qlen >= 6 {
+            2
+        } else if qlen >= 4 {
+            1
+        } else {
+            0
+        };
+        let is_typo_match = if max_edit > 0 {
+            let name_len_diff = qlen.abs_diff(name_lower.len());
+            let name_edit_dist = if name_len_diff <= max_edit {
+                edit_distance(&query_lower, &name_lower)
+            } else {
+                usize::MAX
+            };
+            let bin_edit_dist = tool
+                .binary
+                .as_ref()
+                .map(|b| {
+                    let bl = b.to_lowercase();
+                    if qlen.abs_diff(bl.len()) <= max_edit {
+                        edit_distance(&query_lower, &bl)
+                    } else {
+                        usize::MAX
+                    }
+                })
+                .unwrap_or(usize::MAX);
+            name_edit_dist.min(bin_edit_dist) <= max_edit
+        } else {
+            false
+        };
+
         // Exact tag match bonus (helps short queries like "rg", "fd")
         let tag_match = tool.tags.iter().any(|t| t == &query_lower);
 
@@ -430,12 +545,35 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
             });
 
         let best_fuzzy = fuzzy_score.max(bin_score);
-        if (best_fuzzy > fuzzy_threshold && has_anchor) || tag_match {
+        // Four paths to inclusion:
+        // 1. Edit distance typo match (handles transpositions like "ripgrpe" -> "ripgrep")
+        // 2. High-confidence fuzzy match — no anchor needed
+        // 3. Normal fuzzy match with anchor (prevents spurious matches)
+        // 4. Exact tag match
+        if is_typo_match
+            || best_fuzzy > fuzzy_high_confidence
+            || (best_fuzzy > fuzzy_threshold && has_anchor)
+            || tag_match
+        {
             let pop_boost = popularity_boost(tool);
             let tag_bonus = if tag_match { 20.0 } else { 0.0 };
+            let base_score = if is_typo_match && best_fuzzy == 0 {
+                // Pure edit-distance match: score inversely proportional to max allowed distance
+                let edit_score = if max_edit <= 1 { 40.0 } else { 25.0 };
+                edit_score + pop_boost + tag_bonus
+            } else {
+                // Discount score slightly for unanchored fuzzy matches
+                let fuzzy_weight =
+                    if best_fuzzy > fuzzy_high_confidence && !has_anchor && !tag_match {
+                        0.2
+                    } else {
+                        0.3
+                    };
+                best_fuzzy as f64 * fuzzy_weight + pop_boost + tag_bonus
+            };
             scored.push(SearchResult {
                 tool: tool.clone(),
-                score: best_fuzzy as f64 * 0.3 + pop_boost + tag_bonus,
+                score: base_score,
                 tool_idx: i,
             });
         }
