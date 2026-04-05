@@ -1,8 +1,8 @@
 [package]
 name = "clidex"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "CLI tool discovery for AI agents — search, compare, and install 440+ command-line tools with structured YAML/JSON output"
+description = "CLI tool discovery for AI agents — search, compare, and install 5,000+ command-line tools with structured YAML/JSON output"
 license = "MIT"
 repository = "https://github.com/syshin0116/clidex"
 homepage = "https://github.com/syshin0116/clidex"
