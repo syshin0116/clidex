@@ -301,32 +301,48 @@ real_index_test!(real_search_performance, |tools: &Vec<
         "navigate directories",
     ];
 
-    // Warm up
+    // --- Uncached (builds BM25 engine per query) ---
     let _ = search::search(tools, "warmup", 10);
 
     let start = Instant::now();
-    let iterations = 10;
-    for _ in 0..iterations {
+    let uncached_iterations = 3;
+    for _ in 0..uncached_iterations {
         for q in &queries {
             let _ = search::search(tools, q, 10);
         }
     }
-    let elapsed = start.elapsed();
-    let per_query = elapsed / (iterations * queries.len() as u32);
+    let uncached_elapsed = start.elapsed();
+    let uncached_per_query = uncached_elapsed / (uncached_iterations * queries.len() as u32);
+
+    // --- Cached (SearchIndex builds BM25 once) ---
+    let index = search::SearchIndex::new(tools.clone());
+    let _ = index.search("warmup", 10);
+
+    let start = Instant::now();
+    let cached_iterations = 10;
+    for _ in 0..cached_iterations {
+        for q in &queries {
+            let _ = index.search(q, 10);
+        }
+    }
+    let cached_elapsed = start.elapsed();
+    let cached_per_query = cached_elapsed / (cached_iterations * queries.len() as u32);
+
+    let speedup = uncached_per_query.as_secs_f64() / cached_per_query.as_secs_f64();
 
     eprintln!(
-        "Real index performance: {:.2}ms/query ({} tools, {} queries x {} iterations)",
-        per_query.as_secs_f64() * 1000.0,
+        "Real index performance ({} tools):\n  Uncached: {:.1}ms/query\n  Cached:   {:.1}ms/query\n  Speedup:  {:.1}x",
         tools.len(),
-        queries.len(),
-        iterations,
+        uncached_per_query.as_secs_f64() * 1000.0,
+        cached_per_query.as_secs_f64() * 1000.0,
+        speedup,
     );
 
-    // Target: < 2000ms per query on full index (BM25 rebuild + edit distance on 5000+ tools)
+    // Cached should be significantly faster
     assert!(
-        per_query.as_millis() < 2000,
-        "Search too slow on real index: {:?} per query (target < 2s)",
-        per_query
+        cached_per_query.as_millis() < 200,
+        "Cached search too slow: {:?} per query (target < 200ms)",
+        cached_per_query
     );
 });
 

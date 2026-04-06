@@ -30,7 +30,7 @@ jobs:
       - name: Check (semantic feature)
         run: cargo check --all-targets --features semantic
 
-      - name: Test
+      - name: Test (unit + fixture)
         run: cargo test
 
       - name: Clippy
@@ -41,3 +41,34 @@ jobs:
 
       - name: Format check
         run: cargo fmt -- --check
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Download real index
+        run: |
+          mkdir -p ~/.clidex
+          curl -fsSL -o ~/.clidex/index.yaml \
+            https://github.com/syshin0116/clidex/releases/download/index/index.yaml
+          echo "Index size: $(wc -c < ~/.clidex/index.yaml) bytes"
+
+      - name: Integration tests (real index)
+        run: cargo test --test search_real_index_test -- --nocapture
+
+      - name: Coverage tests (index quality)
+        run: cargo test --test index_coverage_test -- --nocapture

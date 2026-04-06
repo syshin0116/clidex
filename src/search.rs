@@ -1,5 +1,5 @@
 use crate::model::Tool;
-use bm25::{Document, Language, SearchEngineBuilder, SearchResult as BM25Result};
+use bm25::{Document, Language, SearchEngine, SearchEngineBuilder, SearchResult as BM25Result};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use std::collections::HashMap;
 
@@ -325,16 +325,56 @@ fn build_search_text(tool: &Tool) -> String {
     parts.join(" ")
 }
 
+/// Pre-built search index that caches the BM25 engine for repeated queries.
+/// Use this when running multiple searches against the same tool set.
+pub struct SearchIndex {
+    tools: Vec<Tool>,
+    engine: SearchEngine<usize>,
+    syn_map: HashMap<&'static str, &'static [&'static str]>,
+}
+
+impl SearchIndex {
+    /// Build a search index from a tool list. The BM25 engine is constructed once.
+    pub fn new(tools: Vec<Tool>) -> Self {
+        let documents: Vec<Document<usize>> = tools
+            .iter()
+            .enumerate()
+            .map(|(i, t)| Document {
+                id: i,
+                contents: build_search_text(t),
+            })
+            .collect();
+
+        let engine = SearchEngineBuilder::<usize>::with_documents(Language::English, documents)
+            .b(0.5)
+            .build();
+
+        let syn_map = build_synonym_map();
+
+        Self {
+            tools,
+            engine,
+            syn_map,
+        }
+    }
+
+    /// Search the cached index.
+    pub fn search(&self, query: &str, max_results: usize) -> Vec<SearchResult> {
+        search_with_engine(&self.tools, &self.engine, &self.syn_map, query, max_results)
+    }
+
+    pub fn tools(&self) -> &[Tool] {
+        &self.tools
+    }
+}
+
+/// Convenience function that builds a BM25 engine per call.
+/// For single searches this is fine; for repeated searches use `SearchIndex`.
 pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResult> {
     if tools.is_empty() {
         return vec![];
     }
 
-    let syn_map = build_synonym_map();
-    let query_for_search = preprocess_query(query);
-    let query_lower = query.to_lowercase(); // original for exact matching
-
-    // BM25 search
     let documents: Vec<Document<usize>> = tools
         .iter()
         .enumerate()
@@ -345,10 +385,28 @@ pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResu
         .collect();
 
     let engine = SearchEngineBuilder::<usize>::with_documents(Language::English, documents)
-        .b(0.5) // lower length normalization (docs are padded via repetition)
+        .b(0.5)
         .build();
 
-    let expanded = expand_query(&query_for_search, &syn_map);
+    let syn_map = build_synonym_map();
+    search_with_engine(tools, &engine, &syn_map, query, max_results)
+}
+
+fn search_with_engine(
+    tools: &[Tool],
+    engine: &SearchEngine<usize>,
+    syn_map: &HashMap<&str, &[&str]>,
+    query: &str,
+    max_results: usize,
+) -> Vec<SearchResult> {
+    if tools.is_empty() {
+        return vec![];
+    }
+
+    let query_for_search = preprocess_query(query);
+    let query_lower = query.to_lowercase(); // original for exact matching
+
+    let expanded = expand_query(&query_for_search, syn_map);
     // Always fetch enough candidates for re-ranking (category boost, popularity, etc.)
     let bm25_fetch = (max_results * 5).max(100);
     let bm25_results: Vec<BM25Result<usize>> = engine.search(&expanded, bm25_fetch);

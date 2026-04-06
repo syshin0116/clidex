@@ -1148,6 +1148,7 @@ fn auto_categorize(desc: &str, name: &str) -> String {
     let text = format!("{} {}", name_lower, desc_lower);
 
     let rules: &[(&[&str], &str)] = &[
+        // --- Containers & Orchestration ---
         (
             &["docker", "container", "podman", "image layer"],
             "Development > Docker",
@@ -1156,16 +1157,30 @@ fn auto_categorize(desc: &str, name: &str) -> String {
             &["kubernetes", "k8s", "kubectl", "helm"],
             "Development > Kubernetes",
         ),
+        // --- Version Control ---
         (
             &["git ", "git-", "commit", "branch", "version control"],
             "Version Control > Git",
         ),
+        // --- Development Tools ---
         (
-            &["linter", "lint ", "linting", "code quality"],
+            &[
+                "linter",
+                "lint ",
+                "linting",
+                "code quality",
+                "static analysis",
+            ],
             "Development > Linting",
         ),
         (
-            &["formatter", "formatting", "prettify", "beautif"],
+            &[
+                "formatter",
+                "formatting",
+                "prettify",
+                "beautif",
+                "code format",
+            ],
             "Development > Formatting",
         ),
         (
@@ -1173,50 +1188,32 @@ fn auto_categorize(desc: &str, name: &str) -> String {
             "Development > HTTP Client",
         ),
         (
-            &["http test", "api test", "load test"],
+            &["http test", "api test", "load test", "stress test"],
             "Development > Testing",
         ),
         (
-            &["file manager", "file explorer", "file browser"],
-            "Files and Directories > File Managers",
+            &["test ", "testing", "test framework", "unit test", "spec "],
+            "Development > Testing",
         ),
         (
-            &["search", "grep", "find files", "regex"],
-            "Files and Directories > Search",
+            &["benchmark", "timing", "performance", "profil"],
+            "Development > Benchmarking",
         ),
         (
-            &["rename", "batch rename"],
-            "Files and Directories > Renaming",
+            &["editor", "text editor", "vim", "neovim", "nano", "ide "],
+            "Development > Editor",
         ),
         (
-            &["shell history", "history search"],
-            "Utilities > Shell History",
-        ),
-        (&["shell ", "bash ", "zsh ", "fish "], "Utilities > Shell"),
-        (
-            &["prompt", "starship", "powerline"],
-            "Utilities > Shell Prompt",
+            &["diff", "compare", "merge", "patch "],
+            "Development > Diff",
         ),
         (
-            &["monitor", "system monitor", "top ", "htop", "process"],
-            "Utilities > System Monitoring",
+            &["debug", "debugger", "breakpoint", "inspect"],
+            "Development > Debugging",
         ),
         (
-            &["disk usage", "disk space", " du "],
-            "Utilities > Disk Usage",
-        ),
-        (
-            &["json", "yaml", "toml", "csv", "data process"],
-            "Data Manipulation > Processors",
-        ),
-        (
-            &["encrypt", "decrypt", "cipher", "crypto", "gpg", "age "],
-            "Security > Encryption",
-        ),
-        (&["terminal emulator"], "Utilities > Terminal Emulator"),
-        (
-            &["multiplexer", "tmux", "terminal workspace"],
-            "Utilities > Terminal Multiplexer",
+            &["ci/cd", "ci cd", "deploy", "devops", "release", "pipeline"],
+            "Development > DevOps",
         ),
         (
             &["package manager", "package installer", "dependency manager"],
@@ -1232,47 +1229,327 @@ fn auto_categorize(desc: &str, name: &str) -> String {
             "Development > Version Manager",
         ),
         (
-            &["benchmark", "timing", "performance", "profil"],
-            "Development > Benchmarking",
+            &[
+                "database", "sql", "sqlite", "postgres", "mysql", "redis", "mongo",
+            ],
+            "Development > Database",
         ),
         (
-            &["editor", "text editor", "vim", "neovim", "nano"],
-            "Development > Editor",
+            &[
+                "compiler",
+                "transpil",
+                "build tool",
+                "build system",
+                "makefile",
+            ],
+            "Development > Build",
         ),
-        (&["markdown", "md "], "Utilities > Markdown"),
         (
-            &["test ", "testing", "test framework", "unit test"],
-            "Development > Testing",
+            &["documentation", "doc gen", "docstring", "apidoc"],
+            "Development > Documentation",
         ),
         (
-            &["ci/cd", "ci cd", "deploy", "devops", "release"],
-            "Development > DevOps",
+            &["repl ", "interactive interpreter", "playground"],
+            "Development > REPL",
         ),
-        (&["diff", "compare", "merge"], "Development > Diff"),
         (
-            &["network", "dns", "ping", "traceroute", "ip "],
+            &[
+                "scaffold",
+                "boilerplate",
+                "template",
+                "cookiecutter",
+                "project init",
+            ],
+            "Development > Scaffolding",
+        ),
+        (
+            &["api ", "rest ", "graphql", "grpc", "protobuf"],
+            "Development > API",
+        ),
+        // --- Files and Directories ---
+        (
+            &["file manager", "file explorer", "file browser"],
+            "Files and Directories > File Managers",
+        ),
+        (
+            &["search", "grep", "find files", "regex", "code search"],
+            "Files and Directories > Search",
+        ),
+        (
+            &["rename", "batch rename", "bulk rename"],
+            "Files and Directories > Renaming",
+        ),
+        (
+            &["file sync", "rsync", "backup", "mirror", "replicate"],
+            "Files and Directories > Sync",
+        ),
+        (
+            &["ls ", "list files", "list director", "directory list"],
+            "Files and Directories > Listing",
+        ),
+        (
+            &["cat ", "file viewer", "pager", "less ", "more "],
+            "Files and Directories > Viewer",
+        ),
+        (
+            &["tree ", "directory tree", "folder tree"],
+            "Files and Directories > Tree",
+        ),
+        (
+            &["file transfer", "upload", "scp ", "sftp"],
+            "Files and Directories > Transfer",
+        ),
+        // --- Shell ---
+        (
+            &["shell history", "history search"],
+            "Utilities > Shell History",
+        ),
+        (&["shell ", "bash ", "zsh ", "fish "], "Utilities > Shell"),
+        (
+            &["prompt", "starship", "powerline", "ps1"],
+            "Utilities > Shell Prompt",
+        ),
+        (&["alias", "abbreviation", "shortcut"], "Utilities > Shell"),
+        // --- System ---
+        (
+            &["monitor", "system monitor", "top ", "htop", "process"],
+            "Utilities > System Monitoring",
+        ),
+        (
+            &["disk usage", "disk space", " du "],
+            "Utilities > Disk Usage",
+        ),
+        (
+            &[
+                "system info",
+                "sysinfo",
+                "hardware info",
+                "cpu info",
+                "neofetch",
+            ],
+            "Utilities > System Info",
+        ),
+        (
+            &["cron", "schedule", "periodic", "timer"],
+            "Utilities > Scheduling",
+        ),
+        (
+            &["service", "daemon", "systemd", "init "],
+            "Utilities > Services",
+        ),
+        // --- Data ---
+        (
+            &[
+                "json",
+                "yaml",
+                "toml",
+                "csv",
+                "data process",
+                "data transform",
+            ],
+            "Data Manipulation > Processors",
+        ),
+        (
+            &["xml ", "xpath", "xslt", "html pars"],
+            "Data Manipulation > XML",
+        ),
+        (
+            &["convert", "transform", "translate", "encode", "decode"],
+            "Data Manipulation > Conversion",
+        ),
+        // --- Security ---
+        (
+            &[
+                "encrypt", "decrypt", "cipher", "crypto", "gpg", "age ", "tls", "ssl",
+            ],
+            "Security > Encryption",
+        ),
+        (
+            &["password", "secret", "vault", "credential", "keychain"],
+            "Security > Password",
+        ),
+        (
+            &["scan", "vulnerab", "cve", "audit", "security scan"],
+            "Security > Scanning",
+        ),
+        (
+            &["firewall", "iptables", "nftables", "packet filter"],
+            "Security > Firewall",
+        ),
+        (
+            &["auth", "oauth", "jwt", "token", "saml"],
+            "Security > Authentication",
+        ),
+        // --- Network ---
+        (
+            &["network", "dns", "ping", "traceroute", "ip ", "subnet"],
             "Utilities > Networking",
         ),
+        (&["ssh ", "ssh-", "remote", "tunnel"], "Utilities > SSH"),
         (
-            &["download", "wget", "fetch", "scrape"],
+            &["proxy", "vpn", "socks", "reverse proxy"],
+            "Utilities > Proxy",
+        ),
+        (
+            &["port scan", "nmap", "netcat", "socket"],
+            "Utilities > Network Tools",
+        ),
+        (
+            &["bandwidth", "speed test", "throughput", "traffic"],
+            "Utilities > Network Monitor",
+        ),
+        // --- Terminal ---
+        (
+            &["terminal emulator", "term emu"],
+            "Utilities > Terminal Emulator",
+        ),
+        (
+            &["multiplexer", "tmux", "terminal workspace", "session"],
+            "Utilities > Terminal Multiplexer",
+        ),
+        (
+            &[
+                "tui ",
+                "terminal ui",
+                "terminal interface",
+                "ncurses",
+                "textual",
+            ],
+            "Utilities > TUI",
+        ),
+        (
+            &["color", "colour", "ansi", "theme", "syntax highlight"],
+            "Utilities > Terminal Styling",
+        ),
+        // --- Utilities ---
+        (
+            &["download", "wget", "fetch", "scrape", "crawl"],
             "Utilities > Download",
         ),
         (
-            &["compress", "decompress", "archive", "zip", "tar", "gzip"],
+            &[
+                "compress",
+                "decompress",
+                "archive",
+                "zip",
+                "tar",
+                "gzip",
+                "brotli",
+                "zstd",
+            ],
             "Utilities > Compression",
         ),
         (
-            &["image", "photo", "picture", "png", "jpg", "svg"],
+            &["clipboard", "copy", "paste", "pbcopy"],
+            "Utilities > Clipboard",
+        ),
+        (
+            &[
+                "log ",
+                "logging",
+                "log viewer",
+                "log file",
+                "structured log",
+            ],
+            "Utilities > Log Viewer",
+        ),
+        (
+            &[
+                "hex ",
+                "hex viewer",
+                "hexdump",
+                "binary viewer",
+                "binary editor",
+            ],
+            "Utilities > Hex Viewer",
+        ),
+        (
+            &["watch ", "file watch", "file change", "inotify", "fswatch"],
+            "Utilities > File Watching",
+        ),
+        (
+            &["calculator", "calc ", "math", "arithmetic", "compute"],
+            "Utilities > Calculator",
+        ),
+        (
+            &["clock", "time ", "timezone", "date ", "calendar"],
+            "Utilities > Time",
+        ),
+        (
+            &["weather", "forecast", "temperature"],
+            "Utilities > Weather",
+        ),
+        (
+            &["notification", "alert", "notify"],
+            "Utilities > Notification",
+        ),
+        (&["qrcode", "barcode", "qr "], "Utilities > QR Code"),
+        // --- Media ---
+        (
+            &[
+                "image",
+                "photo",
+                "picture",
+                "png",
+                "jpg",
+                "svg",
+                "screenshot",
+            ],
             "Utilities > Image Processing",
         ),
         (
-            &["video", "media", "stream", "mp4", "ffmpeg"],
+            &[
+                "video",
+                "media player",
+                "stream",
+                "mp4",
+                "ffmpeg",
+                "transcode",
+            ],
             "Utilities > Media",
         ),
         (
-            &["database", "sql", "sqlite", "postgres", "mysql", "redis"],
-            "Development > Database",
+            &["audio", "music", "sound", "mp3", "podcast", "radio"],
+            "Utilities > Audio",
         ),
+        (&["pdf ", "pdf-", "portable document"], "Utilities > PDF"),
+        // --- Productivity ---
+        (
+            &["note", "todo", "task", "productivity", "kanban"],
+            "Productivity > Note Taking",
+        ),
+        (&["presentation", "slides"], "Productivity > Presentations"),
+        (
+            &["email", "mail ", "smtp", "imap", "inbox"],
+            "Productivity > Email",
+        ),
+        (
+            &["chat ", "messaging", "slack", "discord", "irc"],
+            "Productivity > Chat",
+        ),
+        (
+            &["calendar", "event", "schedule", "agenda"],
+            "Productivity > Calendar",
+        ),
+        (
+            &["bookmark", "link manager", "url "],
+            "Productivity > Bookmarks",
+        ),
+        // --- Document ---
+        (&["markdown", "md "], "Utilities > Markdown"),
+        (
+            &["typesett", "latex", "tex ", "document", "pandoc"],
+            "Utilities > Document Processing",
+        ),
+        (
+            &["spell", "grammar", "typo", "proofread"],
+            "Development > Spell Check",
+        ),
+        (
+            &["diagram", "graph ", "chart", "plot", "visuali"],
+            "Utilities > Visualization",
+        ),
+        // --- AI ---
         (
             &[
                 "ai ",
@@ -1283,32 +1560,51 @@ fn auto_categorize(desc: &str, name: &str) -> String {
                 "gemini",
                 "copilot",
                 "coding assistant",
+                "machine learn",
             ],
             "AI > LLM Interaction",
         ),
-        (&["clipboard", "copy", "paste"], "Utilities > Clipboard"),
+        // --- Cloud & Infrastructure ---
+        (&["aws ", "amazon", "s3 "], "Cloud > AWS"),
+        (&["gcloud", "google cloud", "gcp"], "Cloud > GCP"),
+        (&["azure", "microsoft cloud"], "Cloud > Azure"),
         (
-            &["note", "todo", "task", "productivity"],
-            "Productivity > Note Taking",
-        ),
-        (&["presentation", "slides"], "Productivity > Presentations"),
-        (
-            &["log ", "logging", "log viewer", "log file"],
-            "Utilities > Log Viewer",
-        ),
-        (
-            &["hex ", "hex viewer", "hexdump", "binary viewer"],
-            "Utilities > Hex Viewer",
-        ),
-        (
-            &["watch ", "file watch", "file change"],
-            "Utilities > File Watching",
+            &[
+                "terraform",
+                "pulumi",
+                "cloudformation",
+                "infrastructure as code",
+            ],
+            "Cloud > IaC",
         ),
         (
-            &["typesett", "latex", "tex ", "document"],
-            "Utilities > Document Processing",
+            &["serverless", "lambda", "function as a service"],
+            "Cloud > Serverless",
         ),
-        (&["spell", "grammar", "typo"], "Development > Spell Check"),
+        // --- Misc ---
+        (
+            &["game", "entertainment", "fun ", "ascii art", "screensaver"],
+            "Entertainment > Games",
+        ),
+        (
+            &[
+                "finance", "stock", "crypto", "bitcoin", "trading", "currency",
+            ],
+            "Utilities > Finance",
+        ),
+        (
+            &["education", "learning", "tutorial", "flashcard"],
+            "Utilities > Education",
+        ),
+        (&["font ", "typography"], "Utilities > Fonts"),
+        (
+            &["config", "dotfile", "settings", "preference"],
+            "Utilities > Configuration",
+        ),
+        (
+            &["man ", "manpage", "help ", "cheatsheet", "tldr"],
+            "Utilities > Help",
+        ),
     ];
 
     for (keywords, category) in rules {
