@@ -363,6 +363,58 @@ impl SearchIndex {
         search_with_engine(&self.tools, &self.engine, &self.syn_map, query, max_results)
     }
 
+    /// Hybrid search combining cached BM25 + semantic similarity via RRF.
+    #[cfg(feature = "semantic")]
+    pub fn hybrid_search(
+        &self,
+        query: &str,
+        max_results: usize,
+        embeddings: &[Vec<f32>],
+        query_embedding: &[f32],
+    ) -> Vec<SearchResult> {
+        if self.tools.is_empty() || embeddings.len() != self.tools.len() {
+            return self.search(query, max_results);
+        }
+
+        // 1. BM25 search using cached engine
+        let bm25_results = self.search(query, max_results * 3);
+        let has_lexical_confidence = !bm25_results.is_empty();
+        let bm25_ranked: Vec<(usize, f64)> =
+            bm25_results.iter().map(|r| (r.tool_idx, r.score)).collect();
+
+        // 2. Semantic search — cosine similarity, filtered by minimum threshold
+        let mut semantic_scores: Vec<(usize, f32)> = embeddings
+            .iter()
+            .enumerate()
+            .map(|(i, emb)| (i, crate::semantic::cosine_similarity(query_embedding, emb)))
+            .filter(|(_, sim)| *sim >= MIN_SEMANTIC_SIMILARITY)
+            .collect();
+        semantic_scores
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let has_semantic_confidence = !semantic_scores.is_empty();
+        semantic_scores.truncate(max_results * 3);
+
+        // Gate: at least one channel must be confident
+        if !has_lexical_confidence && !has_semantic_confidence {
+            return vec![];
+        }
+
+        // 3. RRF combination
+        let combined =
+            crate::semantic::rrf_combine(&bm25_ranked, &semantic_scores, self.tools.len(), 60.0);
+
+        // 4. Build results
+        combined
+            .into_iter()
+            .take(max_results)
+            .map(|(idx, score)| SearchResult {
+                tool: self.tools[idx].clone(),
+                score,
+                tool_idx: idx,
+            })
+            .collect()
+    }
+
     pub fn tools(&self) -> &[Tool] {
         &self.tools
     }
@@ -419,6 +471,9 @@ fn search_with_engine(
     let mut scored: Vec<SearchResult> = Vec::new();
 
     let query_terms: Vec<&str> = query_for_search.split_whitespace().collect();
+    // Pre-compute lowercased query terms (avoids per-tool re-lowercasing)
+    let query_terms_lower: Vec<String> = query_terms.iter().map(|t| t.to_lowercase()).collect();
+    let query_terms_lower_refs: Vec<&str> = query_terms_lower.iter().map(|s| s.as_str()).collect();
     // Collect synonym-expanded terms for coverage gate (so synonym-only matches aren't killed)
     let expanded_terms: Vec<String> = expanded
         .split_whitespace()
@@ -449,9 +504,9 @@ fn search_with_engine(
 
         // Description match bonus — reward when query terms appear at word boundaries
         let desc_lower = tool.desc.to_lowercase();
-        let desc_match_count = query_terms
+        let desc_match_count = query_terms_lower_refs
             .iter()
-            .filter(|t| t.len() > 2 && word_boundary_match(&desc_lower, &t.to_lowercase()))
+            .filter(|t| t.len() > 2 && word_boundary_match(&desc_lower, t))
             .count();
         let desc_bonus = desc_match_count as f64 * 5.0;
 
@@ -463,14 +518,13 @@ fn search_with_engine(
             .filter(|w| w.len() > 2)
             .collect();
         let cat_bonus = {
-            let matching_terms = query_for_search
-                .to_lowercase()
-                .split_whitespace()
+            let matching_terms = query_terms_lower_refs
+                .iter()
                 .filter(|t| {
                     t.len() > 2
                         && cat_words
                             .iter()
-                            .any(|cw| cw.starts_with(t) || t.starts_with(cw))
+                            .any(|cw| cw.starts_with(*t) || t.starts_with(cw))
                 })
                 .count();
             if desc_match_count > 0 {
@@ -647,9 +701,9 @@ fn search_with_engine(
 }
 
 /// Hybrid search combining BM25 + semantic similarity via RRF.
-/// Uses per-channel confidence gates: at least one channel must have confident results
-/// for any results to be returned.
+/// Prefer `SearchIndex::hybrid_search()` which reuses the cached BM25 engine.
 #[cfg(feature = "semantic")]
+#[deprecated(note = "Use SearchIndex::hybrid_search() for cached BM25 engine")]
 pub fn hybrid_search(
     tools: &[Tool],
     query: &str,
@@ -698,11 +752,22 @@ pub fn hybrid_search(
         .collect()
 }
 
+/// Filter tools by category using hierarchical prefix matching.
+/// "File" matches "File Management" (word prefix) but not "Text Filters" (substring).
+/// "Utilities" matches "Utilities > General" and "Utilities > Network" (hierarchy prefix).
 pub fn filter_by_category(tools: &[Tool], category: &str) -> Vec<Tool> {
     let cat_lower = category.to_lowercase();
     let mut filtered: Vec<Tool> = tools
         .iter()
-        .filter(|t| t.category.to_lowercase().contains(&cat_lower))
+        .filter(|t| {
+            let tool_cat = t.category.to_lowercase();
+            // Exact match
+            tool_cat == cat_lower
+                // Hierarchical prefix: "Utilities" matches "Utilities > Network"
+                || tool_cat.starts_with(&format!("{} > ", cat_lower))
+                // Word-prefix match: "File" matches "File Management" (starts at word boundary)
+                || tool_cat.starts_with(&format!("{} ", cat_lower))
+        })
         .cloned()
         .collect();
     filtered.sort_by(|a, b| b.stars.unwrap_or(0).cmp(&a.stars.unwrap_or(0)));
@@ -730,4 +795,342 @@ pub fn find_tool(tools: &[Tool], name: &str) -> Option<Tool> {
                     .is_some_and(|b| b.to_lowercase() == name_lower)
         })
         .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Links, Tool};
+    use std::collections::BTreeMap;
+
+    fn make_tool(
+        name: &str,
+        binary: Option<&str>,
+        desc: &str,
+        category: &str,
+        tags: &[&str],
+        stars: Option<u64>,
+    ) -> Tool {
+        Tool {
+            name: name.to_string(),
+            binary: binary.map(|s| s.to_string()),
+            desc: desc.to_string(),
+            category: category.to_string(),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            install: BTreeMap::new(),
+            stars,
+            brew_installs_365d: None,
+            links: Links::default(),
+            last_updated: None,
+        }
+    }
+
+    // =================== edit_distance ===================
+
+    #[test]
+    fn edit_distance_identical() {
+        assert_eq!(edit_distance("ripgrep", "ripgrep"), 0);
+    }
+
+    #[test]
+    fn edit_distance_single_substitution() {
+        assert_eq!(edit_distance("ripgrep", "ripgrpp"), 1);
+    }
+
+    #[test]
+    fn edit_distance_transposition() {
+        // "ripgrpe" -> "ripgrep" requires 2 ops in classic Levenshtein (no Damerau)
+        assert_eq!(edit_distance("ripgrpe", "ripgrep"), 2);
+    }
+
+    #[test]
+    fn edit_distance_insertion_deletion() {
+        assert_eq!(edit_distance("bat", "bats"), 1); // insertion
+        assert_eq!(edit_distance("bats", "bat"), 1); // deletion
+    }
+
+    #[test]
+    fn edit_distance_empty_strings() {
+        assert_eq!(edit_distance("", ""), 0);
+        assert_eq!(edit_distance("abc", ""), 3);
+        assert_eq!(edit_distance("", "xyz"), 3);
+    }
+
+    #[test]
+    fn edit_distance_completely_different() {
+        assert_eq!(edit_distance("abc", "xyz"), 3);
+    }
+
+    // =================== word_boundary_match ===================
+
+    #[test]
+    fn word_boundary_exact_token() {
+        assert!(word_boundary_match("command-line json processor", "json"));
+        assert!(word_boundary_match(
+            "command-line json processor",
+            "processor"
+        ));
+    }
+
+    #[test]
+    fn word_boundary_prefix_match() {
+        // "process" is a prefix of "processor"
+        assert!(word_boundary_match(
+            "command-line json processor",
+            "process"
+        ));
+    }
+
+    #[test]
+    fn word_boundary_reverse_prefix() {
+        // token "cpu" is prefix of term "cpuinfo"
+        assert!(word_boundary_match("cpu monitor", "cpuinfo"));
+    }
+
+    #[test]
+    fn word_boundary_no_substring_match() {
+        // "son" appears as substring in "json" but not at a word boundary
+        assert!(!word_boundary_match("command-line json processor", "son"));
+    }
+
+    #[test]
+    fn word_boundary_hyphenated() {
+        // `-` is preserved in tokens, so "pretty-print" is one token
+        assert!(word_boundary_match("pretty-print output", "pretty"));
+        assert!(word_boundary_match("pretty-print output", "pretty-print"));
+        // "print" alone won't match "pretty-print" (not a prefix, not equal)
+        assert!(!word_boundary_match("pretty-print output", "print"));
+    }
+
+    #[test]
+    fn word_boundary_empty_text() {
+        assert!(!word_boundary_match("", "test"));
+    }
+
+    // =================== intent_coverage ===================
+
+    #[test]
+    fn intent_coverage_full_match() {
+        let tool = make_tool(
+            "jq",
+            None,
+            "Command-line JSON processor",
+            "Data Processing",
+            &["json", "filter"],
+            Some(30000),
+        );
+        let terms = vec!["json", "processor"];
+        let (bonus, covered, total) = intent_coverage(&terms, &tool);
+        assert_eq!(covered, 2);
+        assert_eq!(total, 2);
+        assert_eq!(bonus, 12.0); // full coverage bonus
+    }
+
+    #[test]
+    fn intent_coverage_partial_match() {
+        let tool = make_tool(
+            "jq",
+            None,
+            "Command-line JSON processor",
+            "Data Processing",
+            &["json", "filter"],
+            Some(30000),
+        );
+        let terms = vec!["json", "yaml"];
+        let (bonus, covered, total) = intent_coverage(&terms, &tool);
+        assert_eq!(covered, 1);
+        assert_eq!(total, 2);
+        assert!(bonus > 0.0 && bonus < 12.0); // partial bonus
+    }
+
+    #[test]
+    fn intent_coverage_no_match() {
+        let tool = make_tool(
+            "jq",
+            None,
+            "Command-line JSON processor",
+            "Data Processing",
+            &["json", "filter"],
+            Some(30000),
+        );
+        let terms = vec!["video", "stream"];
+        let (bonus, covered, _) = intent_coverage(&terms, &tool);
+        assert_eq!(covered, 0);
+        assert_eq!(bonus, 0.0);
+    }
+
+    #[test]
+    fn intent_coverage_empty_terms() {
+        let tool = make_tool("jq", None, "desc", "cat", &[], Some(1000));
+        let terms: Vec<&str> = vec![];
+        let (bonus, covered, total) = intent_coverage(&terms, &tool);
+        assert_eq!(covered, 0);
+        assert_eq!(total, 0);
+        assert_eq!(bonus, 0.0);
+    }
+
+    #[test]
+    fn intent_coverage_short_term_name_match() {
+        // Short terms (<=2 chars) should only match name/binary/exact-tag
+        let tool = make_tool(
+            "fd",
+            None,
+            "Find files fast",
+            "File Management",
+            &["find", "fd"],
+            Some(34000),
+        );
+        let terms = vec!["fd"];
+        let (_, covered, _) = intent_coverage(&terms, &tool);
+        assert_eq!(covered, 1); // matches name
+    }
+
+    #[test]
+    fn intent_coverage_short_term_no_desc_match() {
+        // "fi" should NOT match "find" in description (too short, only name/binary/tag)
+        let tool = make_tool(
+            "grep",
+            None,
+            "Find patterns in files",
+            "Search",
+            &["search"],
+            Some(1000),
+        );
+        let terms = vec!["fi"];
+        let (_, covered, _) = intent_coverage(&terms, &tool);
+        assert_eq!(covered, 0);
+    }
+
+    // =================== popularity_boost ===================
+
+    #[test]
+    fn popularity_boost_high_stars() {
+        let tool = make_tool("fzf", None, "desc", "cat", &[], Some(66000));
+        assert_eq!(popularity_boost(&tool), 8.0);
+    }
+
+    #[test]
+    fn popularity_boost_medium_stars() {
+        let tool = make_tool("t", None, "d", "c", &[], Some(5000));
+        let boost = popularity_boost(&tool);
+        assert!(boost > 2.0 && boost < 5.0, "5000 stars boost = {}", boost);
+    }
+
+    #[test]
+    fn popularity_boost_low_stars() {
+        let tool = make_tool("t", None, "d", "c", &[], Some(500));
+        let boost = popularity_boost(&tool);
+        assert!(boost > 0.0 && boost < 2.0, "500 stars boost = {}", boost);
+    }
+
+    #[test]
+    fn popularity_boost_no_data() {
+        let tool = make_tool("t", None, "d", "c", &[], None);
+        assert_eq!(popularity_boost(&tool), 0.5);
+    }
+
+    #[test]
+    fn popularity_boost_brew_fallback() {
+        let mut tool = make_tool("t", None, "d", "c", &[], None);
+        tool.brew_installs_365d = Some(200000);
+        let boost = popularity_boost(&tool);
+        assert!(boost > 4.0, "200k brew installs boost = {}", boost);
+    }
+
+    #[test]
+    fn popularity_boost_stars_over_brew() {
+        // Stars take priority over brew installs
+        let mut tool = make_tool("t", None, "d", "c", &[], Some(50000));
+        tool.brew_installs_365d = Some(1000000);
+        assert_eq!(popularity_boost(&tool), 8.0); // uses stars, not brew
+    }
+
+    // =================== preprocess_query ===================
+
+    #[test]
+    fn preprocess_removes_noise() {
+        let result = preprocess_query("show me the best json tool");
+        assert!(!result.contains("show"));
+        assert!(!result.contains("best"));
+        assert!(result.contains("json"));
+    }
+
+    #[test]
+    fn preprocess_all_noise_keeps_original() {
+        let result = preprocess_query("show me the best");
+        assert_eq!(result, "show me the best"); // fallback to original
+    }
+
+    // =================== expand_query ===================
+
+    #[test]
+    fn expand_adds_synonyms() {
+        let syn_map = build_synonym_map();
+        let expanded = expand_query("grep", &syn_map);
+        assert!(expanded.contains("grep"));
+        assert!(expanded.contains("search"));
+        assert!(expanded.contains("ripgrep"));
+    }
+
+    #[test]
+    fn expand_original_weighted_higher() {
+        let syn_map = build_synonym_map();
+        let expanded = expand_query("grep", &syn_map);
+        // "grep" should appear twice (2x weight), synonyms once
+        let grep_count = expanded.split_whitespace().filter(|w| *w == "grep").count();
+        assert_eq!(grep_count, 2);
+    }
+
+    #[test]
+    fn expand_no_synonyms() {
+        let syn_map = build_synonym_map();
+        let expanded = expand_query("xyzzy", &syn_map);
+        assert_eq!(expanded, "xyzzy xyzzy"); // just doubled, no synonyms
+    }
+
+    // =================== filter_by_category ===================
+
+    #[test]
+    fn filter_category_exact() {
+        let tools = vec![
+            make_tool("a", None, "d", "File Management", &[], None),
+            make_tool("b", None, "d", "Text Filters", &[], None),
+            make_tool("c", None, "d", "File Management", &[], None),
+        ];
+        let filtered = filter_by_category(&tools, "File Management");
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|t| t.category == "File Management"));
+    }
+
+    #[test]
+    fn filter_category_case_insensitive() {
+        let tools = vec![make_tool("a", None, "d", "File Management", &[], None)];
+        let filtered = filter_by_category(&tools, "file management");
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn filter_category_hierarchical() {
+        let tools = vec![
+            make_tool("a", None, "d", "Utilities > General", &[], None),
+            make_tool("b", None, "d", "Utilities > Network", &[], None),
+            make_tool("c", None, "d", "Development", &[], None),
+        ];
+        // "Utilities" should match both Utilities subcategories
+        let filtered = filter_by_category(&tools, "Utilities");
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn filter_category_no_false_positive() {
+        let tools = vec![
+            make_tool("a", None, "d", "File Management", &[], None),
+            make_tool("b", None, "d", "Text Filters", &[], None),
+            make_tool("c", None, "d", "Profile Tools", &[], None),
+        ];
+        // "File" should match "File Management" but NOT "Text Filters" or "Profile Tools"
+        let filtered = filter_by_category(&tools, "File");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].category, "File Management");
+    }
 }
