@@ -389,8 +389,7 @@ impl SearchIndex {
             .map(|(i, emb)| (i, crate::semantic::cosine_similarity(query_embedding, emb)))
             .filter(|(_, sim)| *sim >= MIN_SEMANTIC_SIMILARITY)
             .collect();
-        semantic_scores
-            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        semantic_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let has_semantic_confidence = !semantic_scores.is_empty();
         semantic_scores.truncate(max_results * 3);
 
@@ -752,9 +751,10 @@ pub fn hybrid_search(
         .collect()
 }
 
-/// Filter tools by category using hierarchical prefix matching.
+/// Filter tools by category using hierarchical matching.
 /// "File" matches "File Management" (word prefix) but not "Text Filters" (substring).
 /// "Utilities" matches "Utilities > General" and "Utilities > Network" (hierarchy prefix).
+/// "Docker" matches "Development > Docker" (leaf segment match).
 pub fn filter_by_category(tools: &[Tool], category: &str) -> Vec<Tool> {
     let cat_lower = category.to_lowercase();
     let mut filtered: Vec<Tool> = tools
@@ -767,6 +767,14 @@ pub fn filter_by_category(tools: &[Tool], category: &str) -> Vec<Tool> {
                 || tool_cat.starts_with(&format!("{} > ", cat_lower))
                 // Word-prefix match: "File" matches "File Management" (starts at word boundary)
                 || tool_cat.starts_with(&format!("{} ", cat_lower))
+                // Leaf segment match: "Docker" matches "Development > Docker"
+                || tool_cat.ends_with(&format!(" > {}", cat_lower))
+                || tool_cat.ends_with(&format!(" > {} ", cat_lower))
+                // Leaf word-prefix: "docker" matches "Development > Docker Tools"
+                || tool_cat
+                    .rsplit(" > ")
+                    .next()
+                    .is_some_and(|leaf| leaf.starts_with(&cat_lower) || leaf == cat_lower)
         })
         .cloned()
         .collect();
@@ -1132,5 +1140,18 @@ mod tests {
         let filtered = filter_by_category(&tools, "File");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].category, "File Management");
+    }
+
+    #[test]
+    fn filter_category_leaf_segment() {
+        let tools = vec![
+            make_tool("a", None, "d", "Development > Docker", &[], None),
+            make_tool("b", None, "d", "Development > Kubernetes", &[], None),
+            make_tool("c", None, "d", "Utilities > General", &[], None),
+        ];
+        // "Docker" should match "Development > Docker" via leaf segment
+        let filtered = filter_by_category(&tools, "Docker");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].category, "Development > Docker");
     }
 }

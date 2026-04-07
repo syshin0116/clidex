@@ -1,8 +1,8 @@
 [package]
 name = "clidex"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
-description = "CLI tool discovery for AI agents — search, compare, and install 5,000+ command-line tools with structured YAML/JSON output"
+description = "CLI tool discovery for AI agents — search, compare, and install 5,000+ CLI tools with structured YAML/JSON output"
 license = "MIT"
 repository = "https://github.com/syshin0116/clidex"
 homepage = "https://github.com/syshin0116/clidex"
@@ -24,6 +24,8 @@ regex = "1"
 nucleo-matcher = "0.3.1"
 model2vec-rs = { version = "0.1.4", optional = true }
 futures = "0.3.32"
+terminal_size = "0.4"
+atty = "0.2"
 
 [dev-dependencies]
 

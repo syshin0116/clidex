@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-07
+
+### Added
+
+- TTY auto-detection: pretty output in terminal, YAML in pipes (like `ls`, `grep`)
+- `--score` flag: include relevance scores in search results
+- `--yaml` flag: force YAML output (complement to `--json` and `--pretty`)
+- `search` subcommand: explicit alternative to positional query (`clidex search "csv" --category data`)
+- `categories` subcommand with name filter (`clidex categories git`)
+- `trending --updated-since` filter: show popular tools updated after a given date
+- Auto-download index on first search in interactive terminals
+- Empty result suggestions: "Did you mean:", partial word re-search tips
+- Install command shown in pretty search output (`$ brew install jq`)
+- Description truncation based on terminal width
+- Compare table adapts column width to terminal size
+- 34 unit tests for core functions (edit_distance, word_boundary_match, intent_coverage, popularity_boost, etc.)
+- `SearchIndex::hybrid_search()` method: semantic path now uses cached BM25 engine
+
+### Fixed
+
+- Category filter false positives: `contains()` → word-prefix + hierarchical + leaf segment matching
+  - "File" no longer matches "Text Filters"
+  - "docker" now matches "Development > Docker" (leaf segment)
+- Exit code semantics: empty search/browse results → exit 0, lookup not-found → exit 1
+- Non-interactive auto-download: CI/pipes get error message instead of silent network calls
+- `to_lowercase()` cached outside per-tool loop (avoids redundant computation)
+- Standalone `hybrid_search()` deprecated in favor of `SearchIndex::hybrid_search()`
+
+### Changed
+
+- Default output: TTY → pretty, pipe → YAML (previously always YAML)
+- Score output uses `SearchResultOutput` wrapper instead of injecting into Tool schema
+- `trending --since` renamed to `--updated-since` for clarity (filters by repo activity, not popularity growth)
+- `trending` description changed to "Show popular tools (sorted by GitHub stars)"
+- README rewritten: quickstart section, unified tool count (5,000+), new features documented
+- SearchIndex used in CLI main entry point (both lexical and semantic paths)
+
 ## [0.3.0] - 2026-04-05
 
 ### Added
@@ -65,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - install.sh for Linux/macOS
 - MIT license
 
+[0.4.0]: https://github.com/syshin0116/clidex/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/syshin0116/clidex/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/syshin0116/clidex/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/syshin0116/clidex/releases/tag/v0.1.0

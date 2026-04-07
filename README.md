@@ -5,7 +5,7 @@
   <strong>CLI tool discovery for AI agents</strong>
 </p>
 <p align="center">
-  Search, compare, and install 440+ command-line tools with structured YAML/JSON output.
+  Search, compare, and install 5,000+ command-line tools with structured YAML/JSON output.
 </p>
 <p align="center">
   <a href="https://github.com/syshin0116/clidex/actions/workflows/ci.yml"><img src="https://github.com/syshin0116/clidex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -13,6 +13,21 @@
   <a href="https://crates.io/crates/clidex"><img src="https://img.shields.io/crates/v/clidex" alt="crates.io"></a>
   <a href="https://github.com/syshin0116/clidex/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
+
+---
+
+## Quickstart
+
+```bash
+# Install
+cargo install clidex            # or: curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
+
+# Search (auto-downloads index on first run)
+clidex "csv to json"            # Pretty output in terminal, YAML in pipes
+clidex "csv to json" --json     # JSON output
+clidex info jq                  # Detailed tool info
+clidex compare jq dasel yq      # Side-by-side comparison
+```
 
 ---
 
@@ -34,7 +49,7 @@ AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands — 
 | Output | Markdown / TUI | YAML / JSON / Pretty |
 | Install info | Links only | `brew install jq` — ready to run |
 | Docs access | Click a link | `llms.txt` URL for agents to read |
-| Pipeline | No | `clidex ... \| next_tool` (YAML by default) |
+| Pipeline | No | `clidex ... \| next_tool` (YAML in pipes) |
 | Compare | No | `clidex compare jq dasel yq` |
 
 ---
@@ -65,13 +80,7 @@ move clidex.exe %USERPROFILE%\.local\bin\
 
 Or download directly from [Releases](https://github.com/syshin0116/clidex/releases/latest).
 
-### Setup
-
-After installing, download the tool index:
-
-```bash
-clidex update    # Downloads ~/.clidex/index.yaml
-```
+> **Note:** In an interactive terminal, the index is downloaded automatically on first search. In non-interactive environments (CI, pipes), run `clidex update` first.
 
 ---
 
@@ -80,38 +89,43 @@ clidex update    # Downloads ~/.clidex/index.yaml
 ### Search
 
 ```bash
-clidex "csv to json"              # YAML output (default, agent-friendly)
-clidex "csv to json" --pretty     # Pretty-printed table (human-friendly)
-clidex "csv to json" --json       # JSON output
-clidex "file manager" -n 3        # Limit to top 3 results
+clidex "csv to json"                # Pretty in terminal, YAML in pipes
+clidex "csv to json" --yaml         # Force YAML output
+clidex "csv to json" --json         # JSON output
+clidex "csv to json" --pretty       # Force pretty output
+clidex "file manager" -n 3          # Limit to top 3 results
+clidex "json processor" --score     # Include relevance scores
 ```
 
-Default output (YAML):
+Search also works as an explicit subcommand:
 
-```yaml
-- name: jq
-  desc: JSON processor
-  category: Data Manipulation > Processors
-  tags: [data, manipulation, processors, json, jq]
-  install:
-    brew: brew install jq
-  links:
-    repo: https://github.com/stedolan/jq
-    homepage: https://jqlang.github.io/jq/
+```bash
+clidex search "csv to json" --category data -n 5
+```
+
+Example output (terminal):
+
+```
+  jq                ★ 34.0k  Data Manipulation > Processors [67.8]
+  JSON processor
+  $ brew install jq
+
+  dasel              ★ 7.9k  Data Manipulation > Processors [59.9]
+  JSON/YAML/TOML/XML processor (like jq/yq)
+  $ brew install dasel
 ```
 
 ### Tool info
 
 ```bash
-clidex info ripgrep               # YAML output (default)
-clidex info ripgrep --pretty      # Human-friendly output
+clidex info ripgrep               # Detailed tool metadata
+clidex info ripgrpe               # Typo → "Did you mean: ripgrep"
 ```
 
 ### Compare tools
 
 ```bash
-clidex compare jq dasel yq           # YAML output (default)
-clidex compare jq dasel yq --pretty  # Side-by-side table
+clidex compare jq dasel yq         # Side-by-side comparison
 ```
 
 ```
@@ -129,30 +143,34 @@ Install         brew install jq                 brew install dasel              
 clidex trending                    # Top tools by GitHub stars
 clidex trending -n 10              # Top 10
 clidex trending --category git     # Top Git tools
+clidex trending --updated-since 2026-01-01 # Filter by repo activity date
 ```
 
 ### Categories
 
 ```bash
-clidex --categories                # List all categories with tool counts
-clidex --category docker           # All tools in a category
-clidex --category "file manager" -n 5
+clidex categories                  # List all categories with tool counts
+clidex categories git              # Filter categories by name
+clidex --category docker -n 5      # Browse tools in a category
 ```
 
 ### Index management
 
 ```bash
-clidex update                      # Download latest index
+clidex update                      # Download/update index
 clidex stats                       # Show index statistics
 ```
 
-### Output formats
+### Output format
 
-| Flag | Format | Description |
-|------|--------|-------------|
-| *(none)* | YAML | **Default.** Structured, agent-friendly |
-| `--pretty` | Pretty | Human-friendly table |
-| `--json` | JSON | Machine-parseable JSON |
+| Flag | Format | When |
+|------|--------|------|
+| *(none, terminal)* | Pretty | Auto-detected when stdout is a TTY |
+| *(none, pipe)* | YAML | Auto-detected when stdout is piped |
+| `--pretty` | Pretty | Force human-friendly table |
+| `--yaml` | YAML | Force structured YAML |
+| `--json` | JSON | Force JSON |
+| `--score` | + Score | Add relevance scores to results |
 
 ### Other flags
 
@@ -166,7 +184,7 @@ clidex stats                       # Show index statistics
 
 Clidex is built for AI agents to consume programmatically. The typical workflow:
 
-1. Agent runs `clidex "task description"` (YAML by default)
+1. Agent runs `clidex "task description"` (YAML output when piped)
 2. Parses the structured result
 3. Extracts `install.brew` or `install.cargo` command
 4. Installs and uses the tool
@@ -194,6 +212,8 @@ links:
   llms_txt: string?     # llms.txt URL (LLM-readable docs)
 ```
 
+With `--score`, search results use a wrapper schema: `{score: number, ...tool}`. Without `--score`, output is plain `[Tool]` — same schema as `info`/`compare`/`trending`.
+
 The `llms_txt` field is especially useful — it points to [llms.txt](https://llmstxt.org/) files that agents can fetch to learn how to use a tool.
 
 ---
@@ -211,7 +231,7 @@ Clidex uses **BM25** text search with domain-specific optimizations:
 - **Alias mapping**: `rg` → ripgrep, `btm` → bottom, `z` → zoxide (24 pairs)
 - **Confidence gates**: Minimum lexical evidence required to prevent false positives from garbage queries
 
-Search performance: **~3ms per query** on the full 440-tool index.
+Search performance: **~3ms per query** on the full 5,000+ tool index (with cached BM25 engine).
 
 ---
 

@@ -1,7 +1,14 @@
 use crate::model::Tool;
+use crate::search::SearchResult;
 use colored::Colorize;
 
-/// Truncate a string to `max_width` characters (not bytes), appending "…" if truncated.
+fn term_width() -> usize {
+    terminal_size::terminal_size()
+        .map(|(w, _)| w.0 as usize)
+        .unwrap_or(120)
+}
+
+/// Truncate a string to `max_width` characters (not bytes), appending "..." if truncated.
 fn truncate_str(s: &str, max_width: usize) -> String {
     if s.chars().count() > max_width {
         let truncated: String = s.chars().take(max_width - 1).collect();
@@ -18,6 +25,107 @@ pub enum Format {
     Json,
 }
 
+/// Stable search result schema — score wraps tool, never injected into Tool.
+#[derive(serde::Serialize)]
+struct SearchResultOutput<'a> {
+    score: f64,
+    #[serde(flatten)]
+    tool: &'a Tool,
+}
+
+/// Print search results. With --score, output uses `{score, ...tool}` wrapper.
+/// Without --score, output is plain `[Tool]` (same schema as info/compare/trending).
+pub fn print_search_results(results: &[SearchResult], format: Format, show_score: bool) {
+    match format {
+        Format::Yaml => {
+            if show_score {
+                let items: Vec<SearchResultOutput> = results
+                    .iter()
+                    .map(|r| SearchResultOutput {
+                        score: (r.score * 10.0).round() / 10.0,
+                        tool: &r.tool,
+                    })
+                    .collect();
+                let yaml = serde_yaml::to_string(&items).expect("Failed to serialize to YAML");
+                print!("{yaml}");
+            } else {
+                let tools: Vec<&Tool> = results.iter().map(|r| &r.tool).collect();
+                let yaml = serde_yaml::to_string(&tools).expect("Failed to serialize to YAML");
+                print!("{yaml}");
+            }
+        }
+        Format::Json => {
+            if show_score {
+                let items: Vec<SearchResultOutput> = results
+                    .iter()
+                    .map(|r| SearchResultOutput {
+                        score: (r.score * 10.0).round() / 10.0,
+                        tool: &r.tool,
+                    })
+                    .collect();
+                let json =
+                    serde_json::to_string_pretty(&items).expect("Failed to serialize to JSON");
+                println!("{json}");
+            } else {
+                let tools: Vec<&Tool> = results.iter().map(|r| &r.tool).collect();
+                let json =
+                    serde_json::to_string_pretty(&tools).expect("Failed to serialize to JSON");
+                println!("{json}");
+            }
+        }
+        Format::Pretty => {
+            let width = term_width();
+            for (i, result) in results.iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                print_search_result_pretty(result, show_score, width);
+            }
+        }
+    }
+}
+
+fn print_search_result_pretty(result: &SearchResult, show_score: bool, width: usize) {
+    let tool = &result.tool;
+
+    let stars_str = match tool.stars {
+        Some(s) if s >= 1000 => format!("★ {:.1}k", s as f64 / 1000.0),
+        Some(s) => format!("★ {s}"),
+        None => String::new(),
+    };
+
+    let install_str = tool
+        .install
+        .iter()
+        .next()
+        .map(|(_, cmd)| cmd.as_str())
+        .unwrap_or("");
+
+    let score_str = if show_score {
+        format!(" [{:.1}]", result.score)
+    } else {
+        String::new()
+    };
+
+    println!(
+        "  {:16} {:>8}  {}{}",
+        tool.name.bold(),
+        stars_str.yellow(),
+        tool.category.cyan(),
+        score_str.dimmed(),
+    );
+
+    // Description — truncate to terminal width
+    let desc_max = width.saturating_sub(4); // 2 indent + margin
+    let desc = truncate_str(&tool.desc, desc_max);
+    println!("  {}", desc.dimmed());
+
+    // Install command (first available)
+    if !install_str.is_empty() {
+        println!("  {}", format!("$ {install_str}").green());
+    }
+}
+
 pub fn print_tools(tools: &[Tool], format: Format) {
     match format {
         Format::Yaml => {
@@ -29,11 +137,12 @@ pub fn print_tools(tools: &[Tool], format: Format) {
             println!("{json}");
         }
         Format::Pretty => {
+            let width = term_width();
             for (i, tool) in tools.iter().enumerate() {
                 if i > 0 {
                     println!();
                 }
-                print_tool_pretty(tool);
+                print_tool_pretty(tool, width);
             }
         }
     }
@@ -97,8 +206,25 @@ fn print_compare_pretty(tools: &[Tool]) {
         return;
     }
 
-    let col_width = 30;
+    let width = term_width();
     let label_width = 14;
+    let available = width.saturating_sub(label_width);
+    // Adaptive column width: split available space among tools
+    let col_width = if !tools.is_empty() {
+        (available / tools.len()).clamp(20, 40)
+    } else {
+        30
+    };
+
+    // Warn if too many tools for terminal width
+    let needed = label_width + tools.len() * (col_width + 2);
+    if needed > width {
+        eprintln!(
+            "  Note: {} tools may not fit in {}-column terminal. Try fewer tools or widen terminal.",
+            tools.len(),
+            width,
+        );
+    }
 
     // Header
     print!("{:label_width$}", "");
@@ -126,6 +252,7 @@ fn print_compare_pretty(tools: &[Tool]) {
     print!("{:label_width$}", "Category".dimmed().to_string());
     for tool in tools {
         let cat = tool.category.split(" > ").last().unwrap_or(&tool.category);
+        let cat = truncate_str(cat, col_width);
         print!("  {:col_width$}", cat.cyan().to_string());
     }
     println!();
@@ -179,27 +306,33 @@ fn print_compare_pretty(tools: &[Tool]) {
     println!();
 }
 
-fn print_tool_pretty(tool: &Tool) {
+fn print_tool_pretty(tool: &Tool, width: usize) {
     let stars_str = match tool.stars {
         Some(s) if s >= 1000 => format!("★ {:.1}k", s as f64 / 1000.0),
         Some(s) => format!("★ {s}"),
         None => String::new(),
     };
 
-    let installers: Vec<&str> = tool.install.keys().map(|s| s.as_str()).collect();
-    let install_str = installers.join("/");
+    let install_str = tool
+        .install
+        .iter()
+        .next()
+        .map(|(_, cmd)| cmd.as_str())
+        .unwrap_or("");
 
     println!(
-        "  {:16} {:>8}  {:12}  {}",
+        "  {:16} {:>8}  {}",
         tool.name.bold(),
         stars_str.yellow(),
-        install_str.dimmed(),
-        tool.category.cyan()
+        tool.category.cyan(),
     );
-    println!("  {}", tool.desc.dimmed());
 
-    if let Some(ref docs) = tool.links.docs {
-        println!("  {}", format!("docs: {docs}").blue());
+    let desc_max = width.saturating_sub(4);
+    let desc = truncate_str(&tool.desc, desc_max);
+    println!("  {}", desc.dimmed());
+
+    if !install_str.is_empty() {
+        println!("  {}", format!("$ {install_str}").green());
     } else if let Some(ref repo) = tool.links.repo {
         println!("  {}", format!("repo: {repo}").blue());
     }
