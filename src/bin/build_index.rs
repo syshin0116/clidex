@@ -977,6 +977,52 @@ async fn enrich_with_npm(tools: &mut [Tool], client: &reqwest::Client, max_reque
     );
 }
 
+/// Manually curated tools that aren't discoverable via automated data sources.
+/// These are app-bundled CLIs, proprietary tools, or tools with unusual distribution.
+fn add_manual_tools(tools: &mut Vec<Tool>) {
+    let existing: std::collections::HashSet<String> =
+        tools.iter().map(|t| t.name.to_lowercase()).collect();
+
+    let manual: Vec<Tool> = vec![
+        Tool {
+            name: "obsidian".to_string(),
+            binary: Some("obsidian".to_string()),
+            desc: "Knowledge base CLI — manage vaults, notes, daily notes, search, tasks, tags, properties, and plugins from the terminal".to_string(),
+            category: "Productivity > Note Taking".to_string(),
+            tags: vec![
+                "notes", "knowledge-base", "vault", "markdown", "daily-notes",
+                "pkm", "zettelkasten", "wiki", "search", "tasks", "tags",
+                "bookmarks", "sync", "plugins", "obsidian",
+            ].into_iter().map(|s| s.to_string()).collect(),
+            install: {
+                let mut m = BTreeMap::new();
+                m.insert("brew".to_string(), "brew install --cask obsidian".to_string());
+                m
+            },
+            stars: None,
+            brew_installs_365d: None,
+            links: Links {
+                repo: None,
+                homepage: Some("https://obsidian.md".to_string()),
+                docs: Some("https://help.obsidian.md".to_string()),
+                llms_txt: None,
+            },
+            last_updated: None,
+        },
+    ];
+
+    let mut added = 0;
+    for tool in manual {
+        if !existing.contains(&tool.name.to_lowercase()) {
+            tools.push(tool);
+            added += 1;
+        }
+    }
+    if added > 0 {
+        eprintln!("Added {} manually curated tools", added);
+    }
+}
+
 /// Probe for llms.txt at known locations for tools with GitHub repos
 async fn probe_llms_txt(tools: &mut [Tool], client: &reqwest::Client, max_probes: usize) {
     let mut probed = 0;
@@ -2368,6 +2414,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         llms_limit
     );
     probe_llms_txt(&mut tools, &client, llms_limit).await;
+
+    // Step 6b: Add manually curated tools not discoverable via data sources
+    add_manual_tools(&mut tools);
 
     // Step 7: Build and save index
     let index = Index {
