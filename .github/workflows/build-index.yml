@@ -51,6 +51,26 @@ jobs:
           LLMS_LIMIT: 500
           TOOLLEEO_LIMIT: 500
 
+      - name: Update tool count in README and docs
+        run: |
+          COUNT=$(grep -c '^- name:' index.yaml)
+          FORMATTED=$(python3 -c "print(f'{int('"$COUNT"'):,}')")
+          sed -i -E "s/[0-9,]+\+ command-line tools/${FORMATTED}+ command-line tools/g" README.md docs/index.html
+          sed -i -E "s/[0-9,]+\+ tool index/${FORMATTED}+ tool index/g" README.md
+          echo "FORMATTED=${FORMATTED}" >> "$GITHUB_ENV"
+
+      - name: Commit updated counts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md docs/index.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Update tool count to ${FORMATTED}"
+            git push
+          else
+            echo "No count changes to commit"
+          fi
+
       - name: Upload index as release asset
         run: |
           # Delete existing release if it exists (ignore errors)
