@@ -5,7 +5,7 @@
   <strong>CLI tool discovery for AI agents</strong>
 </p>
 <p align="center">
-  Search, compare, and install 5,244+ command-line tools with structured YAML/JSON output.
+  Search, compare, and install 5,246+ command-line tools with structured YAML/JSON output.
 </p>
 <p align="center">
   <a href="https://github.com/syshin0116/clidex/actions/workflows/ci.yml"><img src="https://github.com/syshin0116/clidex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -231,7 +231,7 @@ Clidex uses **BM25** text search with domain-specific optimizations:
 - **Alias mapping**: `rg` → ripgrep, `btm` → bottom, `z` → zoxide (24 pairs)
 - **Confidence gates**: Minimum lexical evidence required to prevent false positives from garbage queries
 
-Search performance: **~3ms per query** on the full 5,244+ tool index (with cached BM25 engine).
+Search performance: **~3ms per query** on the full 5,246+ tool index (with cached BM25 engine).
 
 ---
 
