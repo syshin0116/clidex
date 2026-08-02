@@ -23,8 +23,8 @@
 cargo install clidex            # or: curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
 
 # Search (auto-downloads index on first run)
-clidex "csv to json"            # Pretty output in terminal, YAML in pipes
-clidex "csv to json" --json     # JSON output
+clidex "json processor"         # Pretty output in terminal, YAML in pipes
+clidex "json processor" --json  # JSON output
 clidex info jq                  # Detailed tool info
 clidex compare jq dasel yq      # Side-by-side comparison
 ```
@@ -89,10 +89,10 @@ Or download directly from [Releases](https://github.com/syshin0116/clidex/releas
 ### Search
 
 ```bash
-clidex "csv to json"                # Pretty in terminal, YAML in pipes
-clidex "csv to json" --yaml         # Force YAML output
-clidex "csv to json" --json         # JSON output
-clidex "csv to json" --pretty       # Force pretty output
+clidex "json processor"             # Pretty in terminal, YAML in pipes
+clidex "json processor" --yaml      # Force YAML output
+clidex "json processor" --json      # JSON output
+clidex "json processor" --pretty    # Force pretty output
 clidex "file manager" -n 3          # Limit to top 3 results
 clidex "json processor" --score     # Include relevance scores
 ```
@@ -100,17 +100,17 @@ clidex "json processor" --score     # Include relevance scores
 Search also works as an explicit subcommand:
 
 ```bash
-clidex search "csv to json" --category data -n 5
+clidex search "json processor" --category data -n 5
 ```
 
 Example output (terminal):
 
 ```
-  jq                ★ 34.0k  Data Manipulation > Processors [67.8]
+  jq                ★ 34.0k  Data Manipulation > Processors [68.7]
   JSON processor
   $ brew install jq
 
-  dasel              ★ 7.9k  Data Manipulation > Processors [59.9]
+  dasel              ★ 7.9k  Data Manipulation > Processors [60.7]
   JSON/YAML/TOML/XML processor (like jq/yq)
   $ brew install dasel
 ```
