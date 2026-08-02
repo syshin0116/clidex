@@ -57,6 +57,12 @@ jobs:
           LLMS_LIMIT: 500
           TOOLLEEO_LIMIT: 500
 
+      - name: Verify generated index quality
+        run: |
+          mkdir -p ~/.clidex
+          cp index.yaml ~/.clidex/index.yaml
+          cargo test --test index_coverage_test -- --nocapture
+
       - name: Update tool count in README and docs
         run: |
           COUNT=$(grep -c '^- name:' index.yaml)
