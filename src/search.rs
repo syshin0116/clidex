@@ -461,6 +461,23 @@ fn search_with_engine(
     // Always fetch enough candidates for re-ranking (category boost, popularity, etc.)
     let bm25_fetch = (max_results * 5).max(100);
     let bm25_results: Vec<BM25Result<usize>> = engine.search(&expanded, bm25_fetch);
+    let mut candidate_scores: HashMap<usize, f64> = bm25_results
+        .iter()
+        .map(|result| (result.document.id, result.score as f64))
+        .collect();
+
+    // Common names such as "git" may fall outside BM25's candidate window.
+    // Always include exact name and binary matches before re-ranking.
+    for (idx, tool) in tools.iter().enumerate() {
+        if tool.name.eq_ignore_ascii_case(&query_lower)
+            || tool
+                .binary
+                .as_ref()
+                .is_some_and(|binary| binary.eq_ignore_ascii_case(&query_lower))
+        {
+            candidate_scores.entry(idx).or_insert(0.0);
+        }
+    }
 
     // Fuzzy name matching as fallback (nucleo-matcher)
     let mut fuzzy_matcher = Matcher::new(Config::DEFAULT);
@@ -482,15 +499,15 @@ fn search_with_engine(
         .collect();
     let expanded_term_refs: Vec<&str> = expanded_terms.iter().map(|s| s.as_str()).collect();
 
-    for bm25_res in &bm25_results {
-        let idx = bm25_res.document.id;
+    for (idx, bm25_score) in candidate_scores {
         let tool = &tools[idx];
-        let bm25_score = bm25_res.score as f64;
 
         // Name exact match bonus
         let name_lower = tool.name.to_lowercase();
         let name_bonus = if name_lower == query_lower {
-            50.0
+            // An exact tool name is an explicit lookup, so it must outrank
+            // descriptive matches regardless of BM25 term frequency.
+            1_000.0
         } else if tool
             .binary
             .as_ref()
