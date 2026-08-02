@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI now checks Rust 1.86 MSRV, dependencies, semantic builds, formatting, and search quality
 - GitHub Actions are commit-pinned and Dependabot monitors Rust and workflow dependencies
 - Replaced the unmaintained `atty` dependency with the standard library and updated vulnerable transitive dependencies
+- Updated direct Rust dependencies and GitHub Actions to their current stable releases
 - Guaranteed Terraform is present in generated indexes and added a pre-publish index quality gate
 - Added contribution, security, issue, pull request, and agent integration documentation
 - SearchIndex used in CLI main entry point (both lexical and semantic paths)
