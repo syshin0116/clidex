@@ -1,5 +1,5 @@
 //! Integration tests against the real index (~5,000+ tools).
-//! These tests verify search quality at scale — ranking, precision, and false positive control.
+//! These tests verify search ranking, precision, and false-positive control at scale.
 //! Skipped if ~/.clidex/index.yaml doesn't exist.
 
 use clidex::model::Index;
@@ -128,7 +128,7 @@ real_index_test!(real_false_positive_control, |tools: &Vec<
         );
     }
 
-    // Plausible-but-unrelated query — turns out there ARE quantum/physics CLI tools!
+    // This plausible but unrelated query can match real quantum or physics CLI tools.
     // So we just verify the results are actually related, not that there are none
     let r = search::search(tools, "blockchain mining rig", 10);
     assert!(
@@ -176,7 +176,7 @@ real_index_test!(real_typo_correction, |tools: &Vec<clidex::model::Tool>| {
         ("ripgrpe", "ripgrep"),
         ("lazigit", "lazygit"),
         ("zoxdie", "zoxide"),
-        ("tokei", "tokei"), // not a typo — should still work
+        ("tokei", "tokei"), // This is not a typo and should still work.
         ("hyprefine", "hyperfine"),
     ];
     for (typo, expected) in cases {
@@ -260,7 +260,7 @@ real_index_test!(real_synonym_queries, |tools: &Vec<clidex::model::Tool>| {
 // Verifies ranking quality when many similar tools compete.
 
 real_index_test!(real_crowded_category, |tools: &Vec<clidex::model::Tool>| {
-    // "git" has many tools — lazygit should be prominent (high stars)
+    // Git has many tools, and lazygit should be prominent due to its stars.
     let r = search::search(tools, "git tui", 10);
     let git_tools: Vec<&str> = r.iter().map(|x| x.tool.name.as_str()).collect();
     assert!(

@@ -155,7 +155,7 @@ const MIN_LEXICAL_THRESHOLD: f64 = 2.0;
 const MIN_SEMANTIC_SIMILARITY: f32 = 0.3;
 
 /// Popularity boost using stars (primary) or brew install count (fallback).
-/// Max ~8.0 — acts as tie-breaker, not a primary ranking signal.
+/// Max ~8.0. This acts as a tie-breaker, not a primary ranking signal.
 fn popularity_boost(tool: &Tool) -> f64 {
     // Primary: GitHub stars
     if let Some(s) = tool.stars {
@@ -179,7 +179,7 @@ fn popularity_boost(tool: &Tool) -> f64 {
             };
         }
     }
-    0.5 // no popularity data — lower default
+    0.5 // Use a lower default when popularity data is unavailable.
 }
 
 /// Check if a term matches within text at a word boundary.
@@ -382,7 +382,7 @@ impl SearchIndex {
         let bm25_ranked: Vec<(usize, f64)> =
             bm25_results.iter().map(|r| (r.tool_idx, r.score)).collect();
 
-        // 2. Semantic search — cosine similarity, filtered by minimum threshold
+        // 2. Semantic search using cosine similarity and a minimum threshold.
         let mut semantic_scores: Vec<(usize, f32)> = embeddings
             .iter()
             .enumerate()
@@ -501,7 +501,7 @@ fn search_with_engine(
             0.0
         };
 
-        // Description match bonus — reward when query terms appear at word boundaries
+        // Reward query terms that appear at description word boundaries.
         let desc_lower = tool.desc.to_lowercase();
         let desc_match_count = query_terms_lower_refs
             .iter()
@@ -509,7 +509,7 @@ fn search_with_engine(
             .count();
         let desc_bonus = desc_match_count as f64 * 5.0;
 
-        // Category match bonus — if query terms appear in the category, boost
+        // Boost query terms that appear in the category.
         // Uses stemming-like matching (checks if cat word starts with query term or vice versa)
         let cat_lower = tool.category.to_lowercase();
         let cat_words: Vec<&str> = cat_lower
@@ -533,7 +533,7 @@ fn search_with_engine(
             }
         };
 
-        // Intent coverage bonus — how well query terms are covered by the tool's metadata
+        // Add a bonus for query terms covered by tool metadata.
         let (intent_bonus, covered, _) = intent_coverage(&query_terms, tool);
 
         // Synonym coverage: gate + weak scoring bonus for synonym-only matches
@@ -550,7 +550,7 @@ fn search_with_engine(
             bm25_score + name_bonus + cat_bonus + desc_bonus + intent_bonus + syn_intent_bonus;
 
         // Gate: require minimum lexical evidence (exact name/binary matches bypass).
-        // Also require at least one query term (or its synonym) to appear in tool metadata —
+        // Also require at least one query term or synonym in tool metadata.
         // this prevents BM25 false positives from tokenized garbage queries,
         // while allowing synonym-only matches through.
         if name_bonus == 0.0 && (lexical_score < MIN_LEXICAL_THRESHOLD || syn_covered == 0) {
@@ -658,7 +658,7 @@ fn search_with_engine(
         let best_fuzzy = fuzzy_score.max(bin_score);
         // Four paths to inclusion:
         // 1. Edit distance typo match (handles transpositions like "ripgrpe" -> "ripgrep")
-        // 2. High-confidence fuzzy match — no anchor needed
+        // 2. A high-confidence fuzzy match does not need an anchor.
         // 3. Normal fuzzy match with anchor (prevents spurious matches)
         // 4. Exact tag match
         if is_typo_match
@@ -720,7 +720,7 @@ pub fn hybrid_search(
     let bm25_ranked: Vec<(usize, f64)> =
         bm25_results.iter().map(|r| (r.tool_idx, r.score)).collect();
 
-    // 2. Semantic search — cosine similarity, filtered by minimum threshold
+    // 2. Semantic search using cosine similarity and a minimum threshold.
     let mut semantic_scores: Vec<(usize, f32)> = embeddings
         .iter()
         .enumerate()
@@ -778,7 +778,7 @@ pub fn filter_by_category(tools: &[Tool], category: &str) -> Vec<Tool> {
         })
         .cloned()
         .collect();
-    filtered.sort_by(|a, b| b.stars.unwrap_or(0).cmp(&a.stars.unwrap_or(0)));
+    filtered.sort_by_key(|tool| std::cmp::Reverse(tool.stars.unwrap_or(0)));
     filtered
 }
 
@@ -788,7 +788,7 @@ pub fn get_categories(tools: &[Tool]) -> Vec<(String, usize)> {
         *map.entry(tool.category.clone()).or_insert(0usize) += 1;
     }
     let mut cats: Vec<(String, usize)> = map.into_iter().collect();
-    cats.sort_by(|a, b| b.1.cmp(&a.1));
+    cats.sort_by_key(|category| std::cmp::Reverse(category.1));
     cats
 }
 

@@ -56,7 +56,7 @@ clidex stats                      # Index statistics
 
 ## Output Formats
 
-- *(default)*: YAML — structured, agent-friendly
+- *(default)*: YAML, structured and agent-friendly
 - `--pretty`: Human-friendly table
 - `--json`: Machine-parseable JSON
 

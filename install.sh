@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# clidex installer — downloads the latest release binary for your platform
+# clidex installer: downloads and verifies the latest release binary
 
 REPO="syshin0116/clidex"
 
@@ -49,6 +49,30 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 # Download and extract
 curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE"
+curl -fsSL "https://github.com/${REPO}/releases/latest/download/SHA256SUMS" \
+  -o "$TMP_DIR/SHA256SUMS"
+
+# Verify the archive before extracting it.
+EXPECTED=$(awk -v archive="$ARCHIVE" '$2 == archive { print $1 }' "$TMP_DIR/SHA256SUMS")
+if [ -z "$EXPECTED" ]; then
+  echo "No checksum found for $ARCHIVE" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL=$(sha256sum "$TMP_DIR/$ARCHIVE" | awk '{ print $1 }')
+elif command -v shasum >/dev/null 2>&1; then
+  ACTUAL=$(shasum -a 256 "$TMP_DIR/$ARCHIVE" | awk '{ print $1 }')
+else
+  echo "A SHA-256 checksum tool is required (sha256sum or shasum)" >&2
+  exit 1
+fi
+
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+  echo "Checksum verification failed for $ARCHIVE" >&2
+  exit 1
+fi
+
 tar xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
 
 # Install

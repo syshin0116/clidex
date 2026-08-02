@@ -1,4 +1,4 @@
-//! Index coverage tests — verify that the index contains must-have CLI tools
+//! Index coverage tests verify that the index contains must-have CLI tools.
 //! and has sufficient category breadth.
 //! Skipped if ~/.clidex/index.yaml doesn't exist.
 
@@ -73,9 +73,9 @@ const MUST_HAVE_TOOLS: &[(&str, &[&str])] = &[
 ];
 
 /// Tools in MUST_HAVE_TOOLS that we know are currently not in the index.
-/// Track these explicitly — remove from here when they get added to the pipeline.
+/// Track these explicitly and remove them when they are added to the pipeline.
 const KNOWN_MISSING: &[&str] = &[
-    // "dog" — DNS client, project archived, not in major package managers
+    // dog: DNS client, project archived, not in major package managers
     "dog",
 ];
 
@@ -137,7 +137,7 @@ fn test_must_have_tools_present() {
     for km in KNOWN_MISSING {
         assert!(
             all_must_have.contains(km),
-            "KNOWN_MISSING entry '{}' is not in MUST_HAVE_TOOLS — remove it or add it to must-have list", km,
+            "KNOWN_MISSING entry '{}' is not in MUST_HAVE_TOOLS; remove it or add it to the must-have list", km,
         );
     }
 

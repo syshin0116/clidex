@@ -44,11 +44,13 @@ fn parse_awesome_cli_apps(markdown: &str) -> Vec<Tool> {
     let mut current_category = String::new();
     let mut current_subcategory: Option<String> = None;
 
-    let link_re = Regex::new(r"^\s*-\s+\[([^\]]+)\]\(([^)]+)\)\s*[-–—]\s*(.+)$").unwrap();
+    let link_re =
+        Regex::new(r"^\s*-\s+\[([^\]]+)\]\(([^)]+)\)\s*[-\u{2013}\u{2014}]\s*(.+)$").unwrap();
     let link_no_desc_re = Regex::new(r"^\s*-\s+\[([^\]]+)\]\(([^)]+)\)\s*$").unwrap();
-    let multi_link_re =
-        Regex::new(r"^\s*-\s+\[([^\]]+)\]\(([^)]+)\),\s*\[([^\]]+)\]\(([^)]+)\)\s*[-–—]\s*(.+)$")
-            .unwrap();
+    let multi_link_re = Regex::new(
+        r"^\s*-\s+\[([^\]]+)\]\(([^)]+)\),\s*\[([^\]]+)\]\(([^)]+)\)\s*[-\u{2013}\u{2014}]\s*(.+)$",
+    )
+    .unwrap();
     let heading_re = Regex::new(r"^(#{2,4})\s+(.+)$").unwrap();
 
     for line in markdown.lines() {
@@ -657,7 +659,7 @@ async fn fetch_single_github(
     }
 }
 
-/// Enrich tools with GitHub stars — uses cache from previous index + parallel fetching
+/// Enrich tools with GitHub stars using a previous-index cache and parallel fetching.
 async fn enrich_with_github(
     tools: &mut [Tool],
     client: &reqwest::Client,
@@ -987,7 +989,7 @@ fn add_manual_tools(tools: &mut Vec<Tool>) {
         Tool {
             name: "obsidian".to_string(),
             binary: Some("obsidian".to_string()),
-            desc: "Knowledge base CLI — manage vaults, notes, daily notes, search, tasks, tags, properties, and plugins from the terminal".to_string(),
+            desc: "Knowledge base CLI for managing vaults, notes, daily notes, search, tasks, tags, properties, and plugins from the terminal".to_string(),
             category: "Productivity > Note Taking".to_string(),
             tags: vec![
                 "notes", "knowledge-base", "vault", "markdown", "daily-notes",
@@ -1096,7 +1098,7 @@ async fn probe_llms_txt(tools: &mut [Tool], client: &reqwest::Client, max_probes
 
 /// Deduplicate tools by repo URL and name, merging data from duplicates
 fn deduplicate(tools: &mut Vec<Tool>) {
-    // Phase 1: Merge by repo URL — collect merge pairs first
+    // Phase 1: collect merge pairs, then merge by repository URL.
     let mut by_repo: HashMap<String, usize> = HashMap::new();
     let mut to_remove = Vec::new();
     // (target_idx, source_idx) pairs for merging

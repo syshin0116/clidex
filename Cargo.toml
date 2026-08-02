@@ -2,13 +2,25 @@
 name = "clidex"
 version = "0.4.0"
 edition = "2021"
-description = "CLI tool discovery for AI agents — search, compare, and install 5,000+ CLI tools with structured YAML/JSON output"
+rust-version = "1.86"
+autobins = false
+description = "CLI tool discovery for AI agents: search, compare, and install 5,000+ CLI tools with structured YAML/JSON output"
 license = "MIT"
 repository = "https://github.com/syshin0116/clidex"
 homepage = "https://github.com/syshin0116/clidex"
 readme = "README.md"
 keywords = ["cli", "search", "ai-agent", "developer-tools", "bm25"]
 categories = ["command-line-utilities", "development-tools"]
+default-run = "clidex"
+
+[[bin]]
+name = "clidex"
+path = "src/main.rs"
+
+[[bin]]
+name = "build_index"
+path = "src/bin/build_index.rs"
+required-features = ["index-builder"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
@@ -37,3 +49,4 @@ strip = true
 [features]
 default = []
 semantic = ["dep:model2vec-rs"]
+index-builder = []

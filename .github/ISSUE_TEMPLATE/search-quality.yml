@@ -1,0 +1,35 @@
+name: Search quality report
+description: Report a missing, irrelevant, or poorly ranked search result.
+title: "[search]: "
+labels:
+  - search-quality
+body:
+  - type: input
+    id: query
+    attributes:
+      label: Query
+      description: Enter the exact query you ran.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual results
+      description: Paste the output, preferably using --json --score.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected results
+      description: Which tools should have appeared, and in what order?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Clidex version
+      placeholder: clidex 0.4.0
+    validations:
+      required: true

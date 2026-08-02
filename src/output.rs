@@ -25,7 +25,7 @@ pub enum Format {
     Json,
 }
 
-/// Stable search result schema — score wraps tool, never injected into Tool.
+/// Stable search result schema: score wraps tool and is never injected into Tool.
 #[derive(serde::Serialize)]
 struct SearchResultOutput<'a> {
     score: f64,
@@ -115,7 +115,7 @@ fn print_search_result_pretty(result: &SearchResult, show_score: bool, width: us
         score_str.dimmed(),
     );
 
-    // Description — truncate to terminal width
+    // Truncate the description to the terminal width.
     let desc_max = width.saturating_sub(4); // 2 indent + margin
     let desc = truncate_str(&tool.desc, desc_max);
     println!("  {}", desc.dimmed());
@@ -263,7 +263,7 @@ fn print_compare_pretty(tools: &[Tool]) {
         let s = match tool.stars {
             Some(s) if s >= 1000 => format!("★ {:.1}k", s as f64 / 1000.0),
             Some(s) => format!("★ {s}"),
-            None => "—".to_string(),
+            None => "-".to_string(),
         };
         print!("  {:col_width$}", s.yellow().to_string());
     }
@@ -277,7 +277,7 @@ fn print_compare_pretty(tools: &[Tool]) {
         } else if let Some((_, cmd)) = tool.install.iter().next() {
             cmd.clone()
         } else {
-            "—".to_string()
+            "-".to_string()
         };
         let install = truncate_str(&install, col_width);
         print!("  {:col_width$}", install.green().to_string());
@@ -291,7 +291,7 @@ fn print_compare_pretty(tools: &[Tool]) {
             .last_updated
             .as_deref()
             .map(|s| s.split('T').next().unwrap_or(s))
-            .unwrap_or("—");
+            .unwrap_or("-");
         print!("  {:col_width$}", updated);
     }
     println!();
@@ -299,7 +299,7 @@ fn print_compare_pretty(tools: &[Tool]) {
     // Links
     print!("{:label_width$}", "Repo".dimmed().to_string());
     for tool in tools {
-        let repo = tool.links.repo.as_deref().unwrap_or("—");
+        let repo = tool.links.repo.as_deref().unwrap_or("-");
         let repo = truncate_str(repo, col_width);
         print!("  {:col_width$}", repo.blue().to_string());
     }

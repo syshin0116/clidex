@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `trending --since` renamed to `--updated-since` for clarity (filters by repo activity, not popularity growth)
 - `trending` description changed to "Show popular tools (sorted by GitHub stars)"
 - README rewritten: quickstart section, unified tool count (5,000+), new features documented
+- Cargo installs only the user-facing `clidex` binary; the index builder is now an internal feature
+- Release archives include SHA-256 checksums, which the install script verifies
+- CI now checks Rust 1.86 MSRV, dependencies, semantic builds, formatting, and search quality
+- GitHub Actions are commit-pinned and Dependabot monitors Rust and workflow dependencies
+- Added contribution, security, issue, pull request, and agent integration documentation
 - SearchIndex used in CLI main entry point (both lexical and semantic paths)
 
 ## [0.3.0] - 2026-04-05
@@ -57,9 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fuzzy anchor too strict — high-confidence fuzzy matches now pass without substring anchor
-- Synonym-only matches killed by `covered == 0` gate — now checks expanded terms
-- `intent_coverage` substring matching — replaced with token-aware `word_boundary_match`
+- Fuzzy anchor too strict: high-confidence fuzzy matches now pass without substring anchor
+- Synonym-only matches killed by `covered == 0` gate: now checks expanded terms
+- `intent_coverage` substring matching: replaced with token-aware `word_boundary_match`
 - `desc_bonus` aligned with `word_boundary_match` for scoring consistency
 - Edit distance skipped for multi-word queries (performance: prevents O(n*m) on 5,000+ tools)
 
