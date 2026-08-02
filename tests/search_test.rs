@@ -136,6 +136,31 @@ fn test_exact_name_match() {
 }
 
 #[test]
+fn test_exact_name_outranks_descriptive_match() {
+    let tools = vec![
+        make_tool(
+            "git",
+            None,
+            "Distributed version control system",
+            "Git",
+            &["vcs"],
+            None,
+        ),
+        make_tool(
+            "jj",
+            None,
+            "Git-compatible version control with Git workflows and Git repositories",
+            "Git",
+            &["git", "vcs", "version-control"],
+            Some(20_000),
+        ),
+    ];
+
+    let results = search::search(&tools, "git", 10);
+    assert_eq!(results[0].tool.name, "git");
+}
+
+#[test]
 fn test_binary_name_match() {
     let tools = sample_tools();
     let results = search::search(&tools, "mlr", 10);
