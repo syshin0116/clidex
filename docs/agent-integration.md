@@ -8,7 +8,7 @@ installing software.
 
 ```shell
 clidex update
-clidex "convert csv to json" --json --score
+clidex "json processor" --json --score
 clidex info jq --json
 ```
 

@@ -19,9 +19,9 @@ clidex update    # Download the tool index
 ### Search
 
 ```bash
-clidex "csv to json"              # YAML output (default, agent-friendly)
-clidex "csv to json" --pretty     # Human-friendly table
-clidex "csv to json" --json       # JSON output
+clidex "json processor"           # YAML output (default, agent-friendly)
+clidex "json processor" --pretty  # Human-friendly table
+clidex "json processor" --json    # JSON output
 clidex "file manager" -n 3        # Top 3 results
 ```
 
