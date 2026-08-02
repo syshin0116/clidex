@@ -105,7 +105,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Audit Rust dependencies
-        uses: rustsec/audit-check@47be0dbd5113ab1b79fe2dd3f68bdf7e426cdc87 # v2
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
