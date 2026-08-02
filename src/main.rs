@@ -158,13 +158,13 @@ async fn load_or_download() -> Result<clidex::model::Index, String> {
         Ok(i) => Ok(i),
         Err(_) if !config::index_path().exists() => {
             if atty::is(atty::Stream::Stdin) {
-                // Interactive terminal — auto-download
+                // Auto-download in an interactive terminal.
                 eprintln!("Index not found. Downloading from {}...", config::INDEX_URL);
                 let count = index::update_index().await?;
                 eprintln!("Index downloaded: {count} tools");
                 index::load_index()
             } else {
-                // Non-interactive (CI, pipe) — don't make network calls silently
+                // Do not make silent network calls in CI or a pipe.
                 Err(format!(
                     "Index not found at {}. Run `clidex update` first.",
                     config::index_path().display()
@@ -275,7 +275,7 @@ fn do_search(
 
     if results.is_empty() {
         suggest_on_empty(query, search_index.tools());
-        return; // exit 0 — empty result is not an error
+        return; // Exit 0 because an empty result is not an error.
     }
     output::print_search_results(&results, format, show_score);
 }
@@ -508,7 +508,7 @@ async fn main() {
         return;
     }
 
-    // No query or command — show help
+    // Show help when there is no query or command.
     use clap::CommandFactory;
     Cli::command().print_help().ok();
     println!();

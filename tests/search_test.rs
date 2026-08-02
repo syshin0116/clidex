@@ -331,7 +331,7 @@ fn test_medium_queries() {
     let r = search::search(&tools, "count lines of code", 5);
     assert_in_top_n(&r, "tokei", 3, "count lines of code");
 
-    // Q14: synonym "http" + "request" — both httpie and curlie are valid
+    // Q14: synonym "http" + "request"; both httpie and curlie are valid
     let r = search::search(&tools, "make http requests", 5);
     assert_in_top_n(&r, "httpie", 3, "make http requests");
     assert_in_top_n(&r, "curlie", 3, "make http requests");
@@ -340,15 +340,15 @@ fn test_medium_queries() {
     let r = search::search(&tools, "navigate directories quickly", 5);
     assert_in_top_n(&r, "zoxide", 3, "navigate directories quickly");
 
-    // Q16: description keywords — miller/csvkit should beat dasel
+    // Q16: description keywords; miller/csvkit should beat dasel
     let r = search::search(&tools, "csv data processing", 5);
     assert_in_top_n(&r, "miller", 3, "csv data processing");
 
-    // Q17: exact + description — tldr should beat navi
+    // Q17: exact + description; tldr should beat navi
     let r = search::search(&tools, "tldr pages", 5);
     assert_in_top_n(&r, "tldr", 1, "tldr pages");
 
-    // Q18: tag "ls" — eza should compete with lsd
+    // Q18: tag "ls"; eza should compete with lsd
     let r = search::search(&tools, "better ls command", 5);
     let names: Vec<&str> = r.iter().take(3).map(|x| x.tool.name.as_str()).collect();
     assert!(
@@ -357,7 +357,7 @@ fn test_medium_queries() {
         names
     );
 
-    // Q19: description keywords — lazygit should beat gitui
+    // Q19: description keywords; lazygit should beat gitui
     let r = search::search(&tools, "git terminal ui", 5);
     assert_in_top_n(&r, "lazygit", 3, "git terminal ui");
     assert_ranks_above(&r, "lazygit", "gitui", "git terminal ui");

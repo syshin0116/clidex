@@ -33,9 +33,9 @@ clidex compare jq dasel yq      # Side-by-side comparison
 
 ## Why Clidex?
 
-AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands — but they don't know which tools exist beyond the basics. An agent uses `grep` when `ripgrep` is 10x faster, or `find` when `fd` is simpler.
+AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands, but they don't know which tools exist beyond the basics. An agent uses `grep` when `ripgrep` is 10x faster, or `find` when `fd` is simpler.
 
-**Clidex bridges this gap.** It's a local CLI that returns structured metadata about CLI tools: what they do, how to install them, and where to find docs. No web search API calls, no HTML parsing, no cost — just a fast local lookup.
+**Clidex bridges this gap.** It's a local CLI that returns structured metadata about CLI tools: what they do, how to install them, and where to find docs. No web search API calls, no HTML parsing, and no cost. It is a fast local lookup.
 
 <p align="center">
   <img src="assets/demo.gif" alt="clidex demo" width="600">
@@ -47,7 +47,7 @@ AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands — 
 |--|------|------|
 | Target user | Humans | AI agents (+ humans) |
 | Output | Markdown / TUI | YAML / JSON / Pretty |
-| Install info | Links only | `brew install jq` — ready to run |
+| Install info | Links only | `brew install jq`, ready to run |
 | Docs access | Click a link | `llms.txt` URL for agents to read |
 | Pipeline | No | `clidex ... \| next_tool` (YAML in pipes) |
 | Compare | No | `clidex compare jq dasel yq` |
@@ -212,9 +212,12 @@ links:
   llms_txt: string?     # llms.txt URL (LLM-readable docs)
 ```
 
-With `--score`, search results use a wrapper schema: `{score: number, ...tool}`. Without `--score`, output is plain `[Tool]` — same schema as `info`/`compare`/`trending`.
+With `--score`, search results use a wrapper schema: `{score: number, ...tool}`. Without `--score`, output is plain `[Tool]`, the same schema as `info`/`compare`/`trending`.
 
-The `llms_txt` field is especially useful — it points to [llms.txt](https://llmstxt.org/) files that agents can fetch to learn how to use a tool.
+The `llms_txt` field is especially useful because it points to [llms.txt](https://llmstxt.org/) files that agents can fetch to learn how to use a tool.
+
+See [agent integration examples](docs/agent-integration.md) for a safe subprocess
+workflow and reusable Codex or Claude Code instructions.
 
 ---
 
@@ -226,7 +229,7 @@ Clidex uses **BM25** text search with domain-specific optimizations:
 - **Synonym expansion**: `grep` → also matches `search`, `find`, `ripgrep`, `rg` (30+ synonym groups)
 - **Intent coverage**: Bonuses based on how many query terms appear in tool metadata
 - **Category boost**: Query terms matching category names get boosted
-- **Popularity boost**: GitHub stars or Homebrew install counts add 0–8 bonus points (tie-breaker, not primary signal)
+- **Popularity boost**: GitHub stars or Homebrew install counts add 0 to 8 bonus points (tie-breaker, not primary signal)
 - **Fuzzy matching**: Catches typos via edit distance (`ripgrpe` → `ripgrep`) and subsequence matching
 - **Alias mapping**: `rg` → ripgrep, `btm` → bottom, `z` → zoxide (24 pairs)
 - **Confidence gates**: Minimum lexical evidence required to prevent false positives from garbage queries
@@ -265,7 +268,7 @@ cargo run --bin build_index -- index.yaml
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GITHUB_TOKEN` | — | GitHub API token (increases rate limit from 60 to 5000/hr) |
+| `GITHUB_TOKEN` | unset | GitHub API token (increases rate limit from 60 to 5000/hr) |
 | `GITHUB_LIMIT` | `50` | Max GitHub API requests |
 | `CRATES_LIMIT` | `100` | Max crates.io lookups |
 | `NPM_LIMIT` | `50` | Max npm registry lookups |
@@ -289,6 +292,10 @@ cargo test
 cargo clippy
 cargo fmt
 ```
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use the
+search quality issue form for missing or poorly ranked results. Report suspected
+vulnerabilities according to [SECURITY.md](SECURITY.md).
 
 ---
 
