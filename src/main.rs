@@ -3,6 +3,7 @@ use clidex::config;
 use clidex::index;
 use clidex::output::{self, Format};
 use clidex::search;
+use std::io::IsTerminal;
 
 #[derive(Parser)]
 #[command(name = "clidex", version, about = "CLI tool discovery for AI agents")]
@@ -144,7 +145,7 @@ fn get_format(pretty: bool, json: bool, yaml: bool) -> Format {
         Format::Json
     } else if yaml {
         Format::Yaml
-    } else if atty::is(atty::Stream::Stdout) {
+    } else if std::io::stdout().is_terminal() {
         Format::Pretty // TTY → human-friendly by default
     } else {
         Format::Yaml // pipe/redirect → machine-readable
@@ -157,7 +158,7 @@ async fn load_or_download() -> Result<clidex::model::Index, String> {
     match index::load_index() {
         Ok(i) => Ok(i),
         Err(_) if !config::index_path().exists() => {
-            if atty::is(atty::Stream::Stdin) {
+            if std::io::stdin().is_terminal() {
                 // Auto-download in an interactive terminal.
                 eprintln!("Index not found. Downloading from {}...", config::INDEX_URL);
                 let count = index::update_index().await?;

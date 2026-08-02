@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release archives include SHA-256 checksums, which the install script verifies
 - CI now checks Rust 1.86 MSRV, dependencies, semantic builds, formatting, and search quality
 - GitHub Actions are commit-pinned and Dependabot monitors Rust and workflow dependencies
+- Replaced the unmaintained `atty` dependency with the standard library and updated vulnerable transitive dependencies
 - Added contribution, security, issue, pull request, and agent integration documentation
 - SearchIndex used in CLI main entry point (both lexical and semantic paths)
 
