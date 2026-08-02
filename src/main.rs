@@ -455,7 +455,7 @@ async fn main() {
                             .unwrap_or(false)
                     });
                 }
-                tools.sort_by(|a, b| b.stars.unwrap_or(0).cmp(&a.stars.unwrap_or(0)));
+                tools.sort_by_key(|tool| std::cmp::Reverse(tool.stars.unwrap_or(0)));
                 tools.truncate(max_results);
                 if tools.is_empty() {
                     eprintln!("No trending tools found");
