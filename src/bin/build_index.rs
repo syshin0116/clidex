@@ -987,6 +987,33 @@ fn add_manual_tools(tools: &mut Vec<Tool>) {
 
     let manual: Vec<Tool> = vec![
         Tool {
+            name: "terraform".to_string(),
+            binary: Some("terraform".to_string()),
+            desc: "Infrastructure as code CLI for building, changing, and versioning cloud and on-premises resources".to_string(),
+            category: "Development > Cloud Infrastructure".to_string(),
+            tags: vec![
+                "infrastructure-as-code", "iac", "cloud", "provisioning",
+                "automation", "aws", "azure", "gcp", "terraform",
+            ].into_iter().map(|s| s.to_string()).collect(),
+            install: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    "brew".to_string(),
+                    "brew install hashicorp/tap/terraform".to_string(),
+                );
+                m
+            },
+            stars: None,
+            brew_installs_365d: None,
+            links: Links {
+                repo: Some("https://github.com/hashicorp/terraform".to_string()),
+                homepage: Some("https://developer.hashicorp.com/terraform".to_string()),
+                docs: Some("https://developer.hashicorp.com/terraform/docs".to_string()),
+                llms_txt: None,
+            },
+            last_updated: None,
+        },
+        Tool {
             name: "obsidian".to_string(),
             binary: Some("obsidian".to_string()),
             desc: "Knowledge base CLI for managing vaults, notes, daily notes, search, tasks, tags, properties, and plugins from the terminal".to_string(),
@@ -2512,4 +2539,56 @@ fn chrono_now() -> String {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .unwrap_or_default();
     output.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_manual_tools_includes_required_terraform_metadata() {
+        let mut tools = Vec::new();
+
+        add_manual_tools(&mut tools);
+
+        let terraform = tools
+            .iter()
+            .find(|tool| tool.name == "terraform")
+            .expect("terraform should be present in every generated index");
+        assert_eq!(terraform.binary.as_deref(), Some("terraform"));
+        assert_eq!(
+            terraform.install.get("brew").map(String::as_str),
+            Some("brew install hashicorp/tap/terraform")
+        );
+        assert_eq!(
+            terraform.links.repo.as_deref(),
+            Some("https://github.com/hashicorp/terraform")
+        );
+    }
+
+    #[test]
+    fn add_manual_tools_does_not_duplicate_existing_terraform() {
+        let mut tools = vec![Tool {
+            name: "Terraform".to_string(),
+            binary: Some("terraform".to_string()),
+            desc: "existing".to_string(),
+            category: "Cloud".to_string(),
+            tags: Vec::new(),
+            install: BTreeMap::new(),
+            stars: None,
+            brew_installs_365d: None,
+            links: Links::default(),
+            last_updated: None,
+        }];
+
+        add_manual_tools(&mut tools);
+
+        assert_eq!(
+            tools
+                .iter()
+                .filter(|tool| tool.name.eq_ignore_ascii_case("terraform"))
+                .count(),
+            1
+        );
+    }
 }
