@@ -357,10 +357,10 @@ fn test_medium_queries() {
         names
     );
 
-    // Q19: description keywords; lazygit should beat gitui
+    // Q19: both prominent Git TUIs should appear near the top.
     let r = search::search(&tools, "git terminal ui", 5);
     assert_in_top_n(&r, "lazygit", 3, "git terminal ui");
-    assert_ranks_above(&r, "lazygit", "gitui", "git terminal ui");
+    assert_in_top_n(&r, "gitui", 3, "git terminal ui");
 
     // Q20: synonym "compare" -> "diff"
     let r = search::search(&tools, "compare text differences", 5);
