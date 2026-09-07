@@ -34,7 +34,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build index builder
-        run: cargo build --release --bin build_index --features index-builder
+        run: cargo build --locked --release --bin build_index --features index-builder,semantic
 
       - name: Download previous index for stars cache
         run: |
@@ -58,10 +58,9 @@ jobs:
           TOOLLEEO_LIMIT: 500
 
       - name: Verify generated index quality
-        run: |
-          mkdir -p ~/.clidex
-          cp index.yaml ~/.clidex/index.yaml
-          cargo test --test index_coverage_test -- --nocapture
+        env:
+          CLIDEX_INDEX_PATH: ${{ github.workspace }}/index.yaml
+        run: cargo test --locked --test index_coverage_test --test search_real_index_test -- --nocapture
 
       - name: Update tool count in README and docs
         run: |
@@ -88,15 +87,12 @@ jobs:
 
       - name: Upload index as release asset
         run: |
-          # Delete existing release if it exists (ignore errors)
-          gh release delete index --yes --cleanup-tag 2>/dev/null || true
-          sleep 2
-          # Create new release with index file
-          gh release create index \
-            --title "Latest Index" \
-            --notes "Auto-generated CLI tool index. Updated daily." \
-            --latest=false \
-            index.yaml
+          if ! gh release view index >/dev/null 2>&1; then
+            gh release create index --title "Latest Index" \
+              --notes "Auto-generated CLI tool index. Updated daily." --latest=false
+          fi
+          gh release upload index index.embeddings.bin --clobber
+          gh release upload index index.yaml --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}

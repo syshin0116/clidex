@@ -377,7 +377,7 @@ impl SearchIndex {
         }
 
         // 1. BM25 search using cached engine
-        let bm25_results = self.search(query, max_results * 3);
+        let bm25_results = self.search(query, max_results.saturating_mul(3));
         let has_lexical_confidence = !bm25_results.is_empty();
         let bm25_ranked: Vec<(usize, f64)> =
             bm25_results.iter().map(|r| (r.tool_idx, r.score)).collect();
@@ -391,7 +391,7 @@ impl SearchIndex {
             .collect();
         semantic_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let has_semantic_confidence = !semantic_scores.is_empty();
-        semantic_scores.truncate(max_results * 3);
+        semantic_scores.truncate(max_results.saturating_mul(3));
 
         // Gate: at least one channel must be confident
         if !has_lexical_confidence && !has_semantic_confidence {
@@ -422,25 +422,7 @@ impl SearchIndex {
 /// Convenience function that builds a BM25 engine per call.
 /// For single searches this is fine; for repeated searches use `SearchIndex`.
 pub fn search(tools: &[Tool], query: &str, max_results: usize) -> Vec<SearchResult> {
-    if tools.is_empty() {
-        return vec![];
-    }
-
-    let documents: Vec<Document<usize>> = tools
-        .iter()
-        .enumerate()
-        .map(|(i, t)| Document {
-            id: i,
-            contents: build_search_text(t),
-        })
-        .collect();
-
-    let engine = SearchEngineBuilder::<usize>::with_documents(Language::English, documents)
-        .b(0.5)
-        .build();
-
-    let syn_map = build_synonym_map();
-    search_with_engine(tools, &engine, &syn_map, query, max_results)
+    SearchIndex::new(tools.to_vec()).search(query, max_results)
 }
 
 fn search_with_engine(
@@ -459,7 +441,7 @@ fn search_with_engine(
 
     let expanded = expand_query(&query_for_search, syn_map);
     // Always fetch enough candidates for re-ranking (category boost, popularity, etc.)
-    let bm25_fetch = (max_results * 5).max(100);
+    let bm25_fetch = max_results.saturating_mul(5).max(100);
     let bm25_results: Vec<BM25Result<usize>> = engine.search(&expanded, bm25_fetch);
     let mut candidate_scores: HashMap<usize, f64> = bm25_results
         .iter()
@@ -727,72 +709,28 @@ pub fn hybrid_search(
     embeddings: &[Vec<f32>],
     query_embedding: &[f32],
 ) -> Vec<SearchResult> {
-    if tools.is_empty() || embeddings.len() != tools.len() {
-        return search(tools, query, max_results);
-    }
-
-    // 1. BM25 search (already applies lexical threshold gate)
-    let bm25_results = search(tools, query, max_results * 3);
-    let has_lexical_confidence = !bm25_results.is_empty();
-    let bm25_ranked: Vec<(usize, f64)> =
-        bm25_results.iter().map(|r| (r.tool_idx, r.score)).collect();
-
-    // 2. Semantic search using cosine similarity and a minimum threshold.
-    let mut semantic_scores: Vec<(usize, f32)> = embeddings
-        .iter()
-        .enumerate()
-        .map(|(i, emb)| (i, crate::semantic::cosine_similarity(query_embedding, emb)))
-        .filter(|(_, sim)| *sim >= MIN_SEMANTIC_SIMILARITY)
-        .collect();
-    semantic_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let has_semantic_confidence = !semantic_scores.is_empty();
-    semantic_scores.truncate(max_results * 3);
-
-    // Gate: at least one channel must be confident
-    if !has_lexical_confidence && !has_semantic_confidence {
-        return vec![];
-    }
-
-    // 3. RRF combination
-    let combined = crate::semantic::rrf_combine(&bm25_ranked, &semantic_scores, tools.len(), 60.0);
-
-    // 4. Build results
-    combined
-        .into_iter()
-        .take(max_results)
-        .map(|(idx, score)| SearchResult {
-            tool: tools[idx].clone(),
-            score,
-            tool_idx: idx,
-        })
-        .collect()
+    SearchIndex::new(tools.to_vec()).hybrid_search(query, max_results, embeddings, query_embedding)
 }
 
 /// Filter tools by category using hierarchical matching.
 /// "File" matches "File Management" (word prefix) but not "Text Filters" (substring).
 /// "Utilities" matches "Utilities > General" and "Utilities > Network" (hierarchy prefix).
 /// "Docker" matches "Development > Docker" (leaf segment match).
+pub fn matches_category(tool: &Tool, category: &str) -> bool {
+    let category = category.to_lowercase();
+    let tool_category = tool.category.to_lowercase();
+    tool_category == category
+        || tool_category.starts_with(&format!("{category} "))
+        || tool_category
+            .rsplit(" > ")
+            .next()
+            .is_some_and(|leaf| leaf.starts_with(&category))
+}
+
 pub fn filter_by_category(tools: &[Tool], category: &str) -> Vec<Tool> {
-    let cat_lower = category.to_lowercase();
-    let mut filtered: Vec<Tool> = tools
+    let mut filtered: Vec<_> = tools
         .iter()
-        .filter(|t| {
-            let tool_cat = t.category.to_lowercase();
-            // Exact match
-            tool_cat == cat_lower
-                // Hierarchical prefix: "Utilities" matches "Utilities > Network"
-                || tool_cat.starts_with(&format!("{} > ", cat_lower))
-                // Word-prefix match: "File" matches "File Management" (starts at word boundary)
-                || tool_cat.starts_with(&format!("{} ", cat_lower))
-                // Leaf segment match: "Docker" matches "Development > Docker"
-                || tool_cat.ends_with(&format!(" > {}", cat_lower))
-                || tool_cat.ends_with(&format!(" > {} ", cat_lower))
-                // Leaf word-prefix: "docker" matches "Development > Docker Tools"
-                || tool_cat
-                    .rsplit(" > ")
-                    .next()
-                    .is_some_and(|leaf| leaf.starts_with(&cat_lower) || leaf == cat_lower)
-        })
+        .filter(|tool| matches_category(tool, category))
         .cloned()
         .collect();
     filtered.sort_by_key(|tool| std::cmp::Reverse(tool.stars.unwrap_or(0)));
@@ -847,6 +785,7 @@ mod tests {
             brew_installs_365d: None,
             links: Links::default(),
             last_updated: None,
+            github_fetched_at: None,
         }
     }
 

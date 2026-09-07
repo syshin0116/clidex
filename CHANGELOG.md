@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Return empty arrays for empty JSON/YAML searches, categories, and trending results.
+- Preserve small semantic relevance scores in structured output.
+- Share search behavior between positional queries and the search subcommand; honor common flags on either side of subcommands.
+- Verify npm and Cargo binary metadata and project identity before adding install commands; distinguish Homebrew's yq implementations.
+- Preserve cached GitHub metadata on refresh failure and expire it by fetch time.
+- Fail explicit real-index tests on missing, malformed, or undersized inputs; test the builder in PR CI and search rankings before index publication.
+- Validate semantic vectors without unsafe reads and bind published embeddings to their model and ordered input texts.
+
+### Added
+
+- `batch` searches multiple queries with one index load and engine build.
+- `CLIDEX_INDEX_PATH` selects an isolated index and adjacent embeddings file.
+- Structured stats output and semantic embedding downloads for semantic builds.
+
 ## [0.4.0] - 2026-04-07
 
 ### Added

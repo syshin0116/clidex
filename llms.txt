@@ -1,6 +1,6 @@
 # Clidex
 
-> CLI tool discovery for AI agents. Search, compare, and install 5,000+ command-line tools with structured YAML/JSON output.
+> CLI tool discovery for AI agents. Search, compare, and install thousands of command-line tools with structured YAML/JSON output.
 
 Clidex indexes CLI tools from Homebrew, awesome-cli-apps, toolleeo, npm, and crates.io. It returns structured YAML/JSON with install commands, GitHub stars, and documentation links. Designed for AI agents that need to discover and install CLI tools programmatically.
 

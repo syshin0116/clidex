@@ -2,19 +2,10 @@
 //! These tests verify search ranking, precision, and false-positive control at scale.
 //! Skipped if ~/.clidex/index.yaml doesn't exist.
 
-use clidex::model::Index;
 use clidex::search;
-use std::fs;
 
-fn load_real_index() -> Option<Vec<clidex::model::Tool>> {
-    let path = dirs::home_dir()?.join(".clidex/index.yaml");
-    let content = fs::read_to_string(path).ok()?;
-    let index: Index = serde_yaml::from_str(&content).ok()?;
-    if index.tools.len() < 100 {
-        return None; // too small to be meaningful
-    }
-    Some(index.tools)
-}
+mod common;
+use common::load_real_index;
 
 macro_rules! real_index_test {
     ($name:ident, $body:expr) => {

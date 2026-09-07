@@ -10,6 +10,7 @@ installing software.
 clidex update
 clidex "json processor" --json --score
 clidex info jq --json
+clidex batch "json processor" "git diff" --json
 ```
 
 Recommended behavior:
@@ -37,3 +38,6 @@ clidex "terminal json processor" --json \
 
 Structured output is the public integration boundary. Integrations should not
 parse pretty terminal output.
+
+For repeated discovery, `batch` returns one `{query, results}` entry per query
+while sharing index loading and engine construction. Empty results are `[]`.
