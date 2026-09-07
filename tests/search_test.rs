@@ -22,6 +22,7 @@ fn make_tool(
         brew_installs_365d: None,
         links: Links::default(),
         last_updated: None,
+        github_fetched_at: None,
     }
 }
 

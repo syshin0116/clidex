@@ -28,7 +28,8 @@ pub enum Format {
 /// Stable search result schema: score wraps tool and is never injected into Tool.
 #[derive(serde::Serialize)]
 struct SearchResultOutput<'a> {
-    score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    score: Option<f64>,
     #[serde(flatten)]
     tool: &'a Tool,
 }
@@ -42,7 +43,7 @@ pub fn print_search_results(results: &[SearchResult], format: Format, show_score
                 let items: Vec<SearchResultOutput> = results
                     .iter()
                     .map(|r| SearchResultOutput {
-                        score: (r.score * 10.0).round() / 10.0,
+                        score: Some(r.score),
                         tool: &r.tool,
                     })
                     .collect();
@@ -59,7 +60,7 @@ pub fn print_search_results(results: &[SearchResult], format: Format, show_score
                 let items: Vec<SearchResultOutput> = results
                     .iter()
                     .map(|r| SearchResultOutput {
-                        score: (r.score * 10.0).round() / 10.0,
+                        score: Some(r.score),
                         tool: &r.tool,
                     })
                     .collect();
@@ -85,6 +86,70 @@ pub fn print_search_results(results: &[SearchResult], format: Format, show_score
     }
 }
 
+pub fn print_batch_results(
+    results: &[(String, Vec<SearchResult>)],
+    format: Format,
+    show_score: bool,
+) {
+    #[derive(serde::Serialize)]
+    struct QueryResults<'a> {
+        query: &'a str,
+        results: Vec<SearchResultOutput<'a>>,
+    }
+    let items: Vec<_> = results
+        .iter()
+        .map(|(query, results)| QueryResults {
+            query,
+            results: results
+                .iter()
+                .map(|result| SearchResultOutput {
+                    score: show_score.then_some(result.score),
+                    tool: &result.tool,
+                })
+                .collect(),
+        })
+        .collect();
+    match format {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&items).expect("JSON serialization")
+        ),
+        Format::Yaml => print!(
+            "{}",
+            serde_yaml::to_string(&items).expect("YAML serialization")
+        ),
+        Format::Pretty => {
+            for (query, results) in results {
+                println!("{}", query.bold());
+                print_search_results(results, format, show_score);
+            }
+        }
+    }
+}
+
+pub fn print_stats(stats: &crate::index::IndexStats, format: Format) {
+    match format {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(stats).expect("JSON serialization")
+        ),
+        Format::Yaml => print!(
+            "{}",
+            serde_yaml::to_string(stats).expect("YAML serialization")
+        ),
+        Format::Pretty => {
+            println!("Index version: {}", stats.version);
+            println!("Generated:     {}", stats.generated);
+            println!("Total tools:   {}", stats.total);
+            println!("Categories:    {}", stats.categories);
+            println!("With install:  {}", stats.with_install);
+            println!("With stars:    {}", stats.with_stars);
+            println!("With docs:     {}", stats.with_docs);
+            println!("With llms.txt: {}", stats.with_llms_txt);
+        }
+    }
+}
+
 fn print_search_result_pretty(result: &SearchResult, show_score: bool, width: usize) {
     let tool = &result.tool;
 
@@ -102,7 +167,7 @@ fn print_search_result_pretty(result: &SearchResult, show_score: bool, width: us
         .unwrap_or("");
 
     let score_str = if show_score {
-        format!(" [{:.1}]", result.score)
+        format!(" [{:.4}]", result.score)
     } else {
         String::new()
     };

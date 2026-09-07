@@ -9,13 +9,14 @@ Install a Rust toolchain compatible with the `rust-version` in `Cargo.toml`, the
 run:
 
 ```shell
-cargo test --all-targets
-cargo clippy --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 ```
 
 Tests that use the current full index expect an index at
-`~/.clidex/index.yaml`. Run `cargo run -- update` before those tests if needed.
+`~/.clidex/index.yaml`, or the explicit `CLIDEX_INDEX_PATH`. An explicit path
+must exist; malformed or unexpectedly small indexes fail the tests. Run `cargo run -- update` before those tests if needed.
 
 ## Search quality changes
 

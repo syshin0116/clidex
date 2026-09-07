@@ -2,19 +2,10 @@
 //! and has sufficient category breadth.
 //! Skipped if ~/.clidex/index.yaml doesn't exist.
 
-use clidex::model::Index;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 
-fn load_real_index() -> Option<Vec<clidex::model::Tool>> {
-    let path = dirs::home_dir()?.join(".clidex/index.yaml");
-    let content = fs::read_to_string(path).ok()?;
-    let index: Index = serde_yaml::from_str(&content).ok()?;
-    if index.tools.len() < 100 {
-        return None;
-    }
-    Some(index.tools)
-}
+mod common;
+use common::load_real_index;
 
 /// Must-have tools organized by functional category.
 /// If any of these are missing (and not in KNOWN_MISSING), the test fails.
@@ -351,9 +342,10 @@ fn test_no_regression_from_previous_build() {
         return;
     };
 
-    // Baselines from 2026-04-02 build. Update when data sources change intentionally.
+    // The September 2026 binary/library validation intentionally removes non-CLI entries.
+    // Keep a floor below the rebuilt 4,800+ tool corpus; required-tool checks remain strict.
     let total = tools.len();
-    let baseline_total = 5000;
+    let baseline_total = 4500;
 
     assert!(
         total >= baseline_total,

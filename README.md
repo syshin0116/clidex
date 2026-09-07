@@ -97,6 +97,15 @@ clidex "file manager" -n 3          # Limit to top 3 results
 clidex "json processor" --score     # Include relevance scores
 ```
 
+For multiple queries, load the index once:
+
+```bash
+clidex batch "json processor" "git diff" --json
+```
+
+Batch output is `[{"query": "...", "results": [...]}]`. Empty results are `[]`,
+including single searches. Common flags work before or after the subcommand.
+
 Search also works as an explicit subcommand:
 
 ```bash
@@ -134,7 +143,7 @@ clidex compare jq dasel yq         # Side-by-side comparison
 Description     JSON processor                  JSON/YAML/TOML/XML processor…   YAML processor
 Category        Processors                      Processors                      Processors
 Stars           ★ 30.8k                         ★ 5.3k                          ★ 2.6k
-Install         brew install jq                 brew install dasel              brew install yq
+Install         brew install jq                 brew install dasel              brew install python-yq
 ```
 
 ### Trending
@@ -234,7 +243,10 @@ Clidex uses **BM25** text search with domain-specific optimizations:
 - **Alias mapping**: `rg` → ripgrep, `btm` → bottom, `z` → zoxide (24 pairs)
 - **Confidence gates**: Minimum lexical evidence required to prevent false positives from garbage queries
 
-Search performance: **~3ms per query** on the full 5,344+ tool index (with cached BM25 engine).
+Search calculation takes a few milliseconds with a cached BM25 engine. Each
+standalone CLI invocation also loads YAML and builds the engine. Use `batch` to
+share that startup cost across queries; measure complete CLI invocations when
+comparing application latency.
 
 ---
 
@@ -261,13 +273,19 @@ The index is rebuilt daily via GitHub Actions and published as a [release asset]
 ## Build index locally
 
 ```bash
-cargo run --bin build_index -- index.yaml
+cargo run --features index-builder --bin build_index -- index.yaml
 ```
+
+To build and download semantic embeddings, compile with `--features semantic`.
+The index builder needs `--features index-builder,semantic` to produce both files.
+Embeddings include their model identifier and ordered input texts. Old or
+mismatched files fall back to lexical search; run `clidex update` to refresh them.
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CLIDEX_INDEX_PATH` | `~/.clidex/index.yaml` | Override the index path; embeddings are stored beside it |
 | `GITHUB_TOKEN` | unset | GitHub API token (increases rate limit from 60 to 5000/hr) |
 | `GITHUB_LIMIT` | `50` | Max GitHub API requests |
 | `CRATES_LIMIT` | `100` | Max crates.io lookups |

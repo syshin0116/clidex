@@ -28,6 +28,8 @@ struct BrewFormula {
     homepage: Option<String>,
     #[serde(default)]
     keg_only: bool,
+    #[serde(default)]
+    urls: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,6 +156,7 @@ fn parse_awesome_cli_apps(markdown: &str) -> Vec<Tool> {
                     llms_txt: None,
                 },
                 last_updated: None,
+                github_fetched_at: None,
             });
         }
     }
@@ -269,6 +272,7 @@ fn parse_toolleeo_csv(apps_csv: &str, categories_csv: &str) -> Vec<Tool> {
                 llms_txt: None,
             },
             last_updated: None,
+            github_fetched_at: None,
         });
     }
 
@@ -348,90 +352,6 @@ fn generate_tags(name: &str, desc: &str, category: &str) -> Vec<String> {
     tags
 }
 
-/// CLI filtering heuristics for Homebrew formulae
-/// Returns true if the formula is likely a CLI tool (not a library)
-fn is_likely_cli(formula: &BrewFormula) -> bool {
-    // keg_only formulae are usually libraries
-    if formula.keg_only {
-        return false;
-    }
-
-    let desc = formula.desc.as_deref().unwrap_or("").to_lowercase();
-
-    // Library indicators
-    let lib_keywords = [
-        "library",
-        "libraries",
-        "lib for",
-        "binding",
-        "bindings",
-        "development framework",
-        "header files",
-        "c++ ",
-        "c/c++",
-        "sdk for",
-        "api for",
-    ];
-    for kw in &lib_keywords {
-        if desc.contains(kw) {
-            return false;
-        }
-    }
-
-    // CLI indicators (positive signals)
-    let cli_keywords = [
-        "command-line",
-        "command line",
-        "cli ",
-        "cli tool",
-        "terminal",
-        "shell",
-        "console",
-        "tui",
-        "ncurses",
-        "curses",
-    ];
-    for kw in &cli_keywords {
-        if desc.contains(kw) {
-            return true;
-        }
-    }
-
-    // Action verbs that suggest a tool
-    let tool_verbs = [
-        "manage",
-        "monitor",
-        "search",
-        "find",
-        "convert",
-        "process",
-        "analyze",
-        "benchmark",
-        "compile",
-        "format",
-        "lint",
-        "download",
-        "upload",
-        "compress",
-        "encrypt",
-        "decrypt",
-        "generate",
-        "visualize",
-        "diff",
-        "merge",
-        "test",
-        "debug",
-    ];
-    for verb in &tool_verbs {
-        if desc.contains(verb) {
-            return true;
-        }
-    }
-
-    // Default: include (most brew formulae are tools)
-    true
-}
-
 /// Enrich tools with Homebrew data
 fn enrich_with_homebrew(tools: &mut [Tool], brew_data: &[BrewFormula]) {
     let brew_map: HashMap<String, &BrewFormula> =
@@ -443,10 +363,28 @@ fn enrich_with_homebrew(tools: &mut [Tool], brew_data: &[BrewFormula]) {
             name_lower.clone(),
             name_lower.replace('-', ""),
             name_lower.replace('_', "-"),
+            format!("python-{name_lower}"),
         ];
 
         for candidate in &candidates {
             if let Some(formula) = brew_map.get(candidate.as_str()) {
+                let matches =
+                    same_repository(tool.links.repo.as_deref(), formula.homepage.as_deref())
+                        || same_repository(
+                            tool.links.repo.as_deref(),
+                            formula.urls["stable"]["url"].as_str(),
+                        )
+                        || tool
+                            .links
+                            .homepage
+                            .as_ref()
+                            .zip(formula.homepage.as_ref())
+                            .is_some_and(|(a, b)| {
+                                a.trim_end_matches('/') == b.trim_end_matches('/')
+                            });
+                if !matches {
+                    continue;
+                }
                 tool.install
                     .insert("brew".to_string(), format!("brew install {}", formula.name));
 
@@ -542,85 +480,55 @@ fn add_homebrew_cli_tools(existing: &mut Vec<Tool>, brew_data: &[BrewFormula]) {
                     llms_txt: None,
                 },
                 last_updated: None,
+                github_fetched_at: None,
             });
         }
     }
 }
 
 fn parse_github_repo(url: &str) -> Option<(String, String)> {
-    let url = url.trim_end_matches('/');
-    if let Some(path) = url.strip_prefix("https://github.com/") {
-        let parts: Vec<&str> = path.split('/').collect();
-        if parts.len() >= 2 {
-            return Some((parts[0].to_string(), parts[1].to_string()));
-        }
+    let url = reqwest::Url::parse(url.trim().trim_start_matches("git+")).ok()?;
+    if url.host_str()? != "github.com" {
+        return None;
     }
-    None
+    let mut parts = url.path_segments()?;
+    let owner = parts.next()?.to_lowercase();
+    let repo = parts.next()?.trim_end_matches(".git").to_lowercase();
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner, repo))
 }
 
-/// Load stars cache from previous index file
-fn load_stars_cache(path: &str) -> HashMap<String, (u64, Option<String>, Option<String>)> {
-    // Returns: name -> (stars, last_updated, homepage)
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return HashMap::new(),
-    };
-    let index: Index = match serde_yaml::from_str(&content) {
-        Ok(i) => i,
-        Err(_) => return HashMap::new(),
+fn same_repository(a: Option<&str>, b: Option<&str>) -> bool {
+    a.and_then(parse_github_repo)
+        .zip(b.and_then(parse_github_repo))
+        .is_some_and(|(a, b)| a == b)
+}
+
+fn load_stars_cache(path: &str) -> HashMap<(String, String), Tool> {
+    let index: Index = match std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_yaml::from_str(&content).ok())
+    {
+        Some(index) => index,
+        None => return HashMap::new(),
     };
     index
         .tools
         .into_iter()
-        .filter_map(|t| {
-            let stars = t.stars?;
-            Some((
-                t.name.to_lowercase(),
-                (stars, t.last_updated, t.links.homepage),
-            ))
+        .filter_map(|tool| {
+            let repo = parse_github_repo(tool.links.repo.as_deref()?)?;
+            tool.stars?;
+            Some((repo, tool))
         })
         .collect()
 }
 
-/// Check if a cached entry is fresh (within max_age_days)
-fn is_cache_fresh(last_updated: &Option<String>, max_age_days: u64) -> bool {
-    let updated = match last_updated {
-        Some(s) => s,
-        None => return false,
-    };
-    // Parse ISO 8601 date prefix (YYYY-MM-DD)
-    if updated.len() < 10 {
-        return false;
-    }
-    let now = chrono_now();
-    if now.len() < 10 {
-        return false;
-    }
-    // Simple day-based comparison using the date command
-    // If we can't parse, treat as stale
-    let updated_date = &updated[..10];
-    let now_date = &now[..10];
-    // Calculate approximate days difference
-    let days_diff = date_diff_days(updated_date, now_date);
-    days_diff < max_age_days as i64
-}
-
-fn date_diff_days(date_a: &str, date_b: &str) -> i64 {
-    // Simple YYYY-MM-DD diff. Parse to days since epoch (approximate).
-    fn to_days(d: &str) -> Option<i64> {
-        let parts: Vec<&str> = d.split('-').collect();
-        if parts.len() < 3 {
-            return None;
-        }
-        let y: i64 = parts[0].parse().ok()?;
-        let m: i64 = parts[1].parse().ok()?;
-        let d: i64 = parts[2].parse().ok()?;
-        Some(y * 365 + m * 30 + d)
-    }
-    match (to_days(date_a), to_days(date_b)) {
-        (Some(a), Some(b)) => (b - a).abs(),
-        _ => 999, // treat as stale if can't parse
-    }
+fn is_cache_fresh(fetched_at: Option<u64>, now: u64, max_age_days: u64) -> bool {
+    fetched_at
+        .and_then(|fetched| now.checked_sub(fetched))
+        .is_some_and(|age| age < max_age_days.saturating_mul(86400))
 }
 
 /// Fetch GitHub stars for a single tool, returning updated fields
@@ -664,88 +572,88 @@ async fn enrich_with_github(
     tools: &mut [Tool],
     client: &reqwest::Client,
     max_requests: usize,
-    stars_cache: &HashMap<String, (u64, Option<String>, Option<String>)>,
+    stars_cache: &HashMap<(String, String), Tool>,
     cache_max_age_days: u64,
 ) {
     let token = std::env::var("GITHUB_TOKEN").ok();
-    let mut cached_hits = 0;
-
-    // Phase 1: Apply cache (3-day freshness)
-    for tool in tools.iter_mut() {
-        if tool.stars.is_some() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut to_fetch = Vec::new();
+    for (i, tool) in tools.iter_mut().enumerate() {
+        let Some(repo) = tool.links.repo.as_deref().and_then(parse_github_repo) else {
             continue;
-        }
-        let key = tool.name.to_lowercase();
-        if let Some((stars, last_updated, homepage)) = stars_cache.get(&key) {
-            if is_cache_fresh(last_updated, cache_max_age_days) {
-                tool.stars = Some(*stars);
-                if tool.last_updated.is_none() {
-                    tool.last_updated = last_updated.clone();
-                }
-                if tool.links.homepage.is_none() {
-                    tool.links.homepage = homepage.clone();
-                }
-                cached_hits += 1;
+        };
+        if let Some(cached) = stars_cache.get(&repo) {
+            tool.stars = cached.stars;
+            tool.last_updated = cached.last_updated.clone();
+            tool.github_fetched_at = cached.github_fetched_at;
+            if tool.links.homepage.is_none() {
+                tool.links.homepage = cached.links.homepage.clone();
             }
         }
-    }
-    eprintln!(
-        "GitHub stars: {} from cache ({}d fresh)",
-        cached_hits, cache_max_age_days
-    );
-
-    // Phase 2: Collect tools that need fresh API calls
-    let mut to_fetch: Vec<(usize, String, String)> = Vec::new();
-    for (i, tool) in tools.iter().enumerate() {
-        if tool.stars.is_some() {
-            continue;
-        }
-        if to_fetch.len() >= max_requests {
-            break;
-        }
-        let repo_url = match &tool.links.repo {
-            Some(url) => url.clone(),
-            None => continue,
-        };
-        if let Some((owner, repo)) = parse_github_repo(&repo_url) {
-            to_fetch.push((i, owner, repo));
+        if !is_cache_fresh(tool.github_fetched_at, now, cache_max_age_days)
+            && to_fetch.len() < max_requests
+        {
+            to_fetch.push((i, repo));
         }
     }
-    eprintln!("GitHub stars: {} to fetch via API", to_fetch.len());
-
-    // Phase 3: Parallel fetch (10 concurrent)
-    let concurrency = 10;
     let mut fetched = 0;
-    for chunk in to_fetch.chunks(concurrency) {
-        let futures: Vec<_> = chunk
-            .iter()
-            .map(|(_, owner, repo)| {
-                fetch_single_github(owner.clone(), repo.clone(), token.clone(), client.clone())
-            })
-            .collect();
-
-        let results = futures::future::join_all(futures).await;
-
-        for (result, (idx, _, _)) in results.into_iter().zip(chunk.iter()) {
+    for chunk in to_fetch.chunks(10) {
+        let results = futures::future::join_all(chunk.iter().map(|(_, (owner, repo))| {
+            fetch_single_github(owner.clone(), repo.clone(), token.clone(), client.clone())
+        }))
+        .await;
+        for (result, (idx, _)) in results.into_iter().zip(chunk) {
             if let Some((stars, pushed, homepage)) = result {
-                tools[*idx].stars = Some(stars);
-                if tools[*idx].last_updated.is_none() {
-                    tools[*idx].last_updated = pushed;
-                }
-                if tools[*idx].links.homepage.is_none() {
-                    tools[*idx].links.homepage = homepage;
+                let tool = &mut tools[*idx];
+                tool.stars = Some(stars);
+                tool.last_updated = pushed;
+                tool.github_fetched_at = Some(now);
+                if tool.links.homepage.is_none() {
+                    tool.links.homepage = homepage;
                 }
                 fetched += 1;
             }
         }
     }
-
     eprintln!(
-        "GitHub stars: {} cached + {} fetched = {} total",
-        cached_hits,
-        fetched,
-        cached_hits + fetched
+        "GitHub stars: {} refreshed; cached values retained on failure",
+        fetched
     );
+}
+
+fn crate_binary(data: &serde_json::Value) -> Option<String> {
+    let version = data["crate"]["max_stable_version"]
+        .as_str()
+        .or_else(|| data["crate"]["max_version"].as_str())?;
+    data["versions"]
+        .as_array()?
+        .iter()
+        .find(|v| v["num"] == version)?["bin_names"]
+        .as_array()?
+        .iter()
+        .find_map(|name| name.as_str().filter(|s| !s.is_empty()).map(String::from))
+}
+
+fn npm_binary(data: &serde_json::Value) -> Option<String> {
+    match &data["bin"] {
+        serde_json::Value::String(path) if !path.is_empty() => {
+            data["name"].as_str()?.rsplit('/').next().map(String::from)
+        }
+        serde_json::Value::Object(bins) => bins
+            .iter()
+            .find(|(name, path)| !name.is_empty() && path.as_str().is_some_and(|s| !s.is_empty()))
+            .map(|(name, _)| name.clone()),
+        _ => None,
+    }
+}
+
+fn npm_repository(data: &serde_json::Value) -> Option<&str> {
+    data["repository"]["url"]
+        .as_str()
+        .or_else(|| data["repository"].as_str())
 }
 
 /// Enrich tools with crates.io install commands
@@ -788,7 +696,9 @@ async fn enrich_with_crates_io(tools: &mut [Tool], client: &reqwest::Client, max
     let mut requests_made = 0;
     let mut found = 0;
 
-    for tool in tools.iter_mut() {
+    let mut candidates: Vec<_> = tools.iter_mut().collect();
+    candidates.sort_by_key(|tool| !crate_overrides.contains_key(tool.name.to_lowercase().as_str()));
+    for tool in candidates {
         if requests_made >= max_requests {
             break;
         }
@@ -820,29 +730,18 @@ async fn enrich_with_crates_io(tools: &mut [Tool], client: &reqwest::Client, max
         {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
-                    // Verify it's likely the same project by checking repository URL
-                    let crate_repo = json["crate"]["repository"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_lowercase();
-                    let tool_repo = tool.links.repo.as_deref().unwrap_or("").to_lowercase();
-
-                    // Extract owner/repo from GitHub URLs for comparison
-                    let extract_owner_repo = |url: &str| -> Option<String> {
-                        url.strip_prefix("https://github.com/")
-                            .map(|p| p.trim_end_matches('/').to_lowercase())
-                    };
-                    let repos_same = extract_owner_repo(&crate_repo)
-                        .zip(extract_owner_repo(&tool_repo))
-                        .map(|(a, b)| a == b)
-                        .unwrap_or(false);
-                    let repo_match =
-                        repos_same || crate_overrides.contains_key(tool_lower.as_str());
-
-                    if repo_match {
-                        tool.install
-                            .insert("cargo".to_string(), format!("cargo install {}", crate_name));
-                        found += 1;
+                    if let Some(binary) = crate_binary(&json) {
+                        if same_repository(
+                            tool.links.repo.as_deref(),
+                            json["crate"]["repository"].as_str(),
+                        ) {
+                            tool.install.insert(
+                                "cargo".to_string(),
+                                format!("cargo install {}", crate_name),
+                            );
+                            tool.binary.get_or_insert(binary);
+                            found += 1;
+                        }
                     }
                 }
             }
@@ -930,7 +829,7 @@ async fn enrich_with_npm(tools: &mut [Tool], client: &reqwest::Client, max_reque
         }
 
         let pkg = pkg_name.unwrap_or_else(|| tool_lower.clone());
-        let api_url = format!("https://registry.npmjs.org/{}", pkg);
+        let api_url = format!("https://registry.npmjs.org/{}/latest", pkg);
         requests_made += 1;
 
         match client
@@ -942,24 +841,13 @@ async fn enrich_with_npm(tools: &mut [Tool], client: &reqwest::Client, max_reque
         {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
-                    // Check bin at top level or in latest version
-                    let has_bin = json.get("bin").is_some()
-                        || json.get("directories").and_then(|d| d.get("bin")).is_some()
-                        || json
-                            .get("dist-tags")
-                            .and_then(|dt| dt.get("latest"))
-                            .and_then(|v| v.as_str())
-                            .and_then(|latest| {
-                                json.get("versions")
-                                    .and_then(|vs| vs.get(latest))
-                                    .and_then(|v| v.get("bin"))
-                            })
-                            .is_some();
-
-                    if has_bin {
-                        tool.install
-                            .insert("npm".to_string(), format!("npm install -g {}", pkg));
-                        found += 1;
+                    if let Some(binary) = npm_binary(&json) {
+                        if same_repository(tool.links.repo.as_deref(), npm_repository(&json)) {
+                            tool.install
+                                .insert("npm".to_string(), format!("npm install -g {}", pkg));
+                            tool.binary.get_or_insert(binary);
+                            found += 1;
+                        }
                     }
                 }
             }
@@ -1012,6 +900,7 @@ fn add_manual_tools(tools: &mut Vec<Tool>) {
                 llms_txt: None,
             },
             last_updated: None,
+            github_fetched_at: None,
         },
         Tool {
             name: "obsidian".to_string(),
@@ -1037,6 +926,7 @@ fn add_manual_tools(tools: &mut Vec<Tool>) {
                 llms_txt: None,
             },
             last_updated: None,
+            github_fetched_at: None,
         },
     ];
 
@@ -1171,6 +1061,18 @@ fn deduplicate(tools: &mut Vec<Tool>) {
             (Some(a), Some(b)) if b > a => base.stars = Some(b),
             _ => {}
         }
+        if base.binary.is_none() {
+            base.binary = other.binary;
+        }
+        if base.last_updated.is_none() {
+            base.last_updated = other.last_updated;
+        }
+        if base.github_fetched_at.is_none() {
+            base.github_fetched_at = other.github_fetched_at;
+        }
+        if base.links.llms_txt.is_none() {
+            base.links.llms_txt = other.links.llms_txt;
+        }
         // Fill empty links
         if base.links.homepage.is_none() {
             base.links.homepage = other.links.homepage;
@@ -1197,6 +1099,13 @@ fn deduplicate(tools: &mut Vec<Tool>) {
                 continue;
             }
             let prev = &tools[prev_idx];
+            if let (Some(a), Some(b)) = (&prev.links.repo, &tool.links.repo) {
+                if !same_repository(Some(a), Some(b))
+                    && a.trim_end_matches('/') != b.trim_end_matches('/')
+                {
+                    continue;
+                }
+            }
             let prev_score = prev.install.len() + prev.tags.len() + prev.stars.is_some() as usize;
             let cur_score = tool.install.len() + tool.tags.len() + tool.stars.is_some() as usize;
             if cur_score > prev_score {
@@ -1734,7 +1643,13 @@ fn discover_from_homebrew(
         }
 
         let desc = formula.desc.as_deref().unwrap_or("").to_lowercase();
-        if hard_exclude.iter().any(|kw| desc.contains(kw)) {
+        let library_only = ["library", "libraries", "bindings", "header files"]
+            .iter()
+            .any(|kw| desc.contains(kw))
+            && ![" tool", "command-line", "command line", "utility"]
+                .iter()
+                .any(|kw| desc.contains(kw));
+        if library_only || hard_exclude.iter().any(|kw| desc.contains(kw)) {
             continue;
         }
 
@@ -1788,6 +1703,7 @@ fn discover_from_homebrew(
                 llms_txt: None,
             },
             last_updated: None,
+            github_fetched_at: None,
         });
         added += 1;
     }
@@ -1870,6 +1786,7 @@ fn discover_from_homebrew_casks(existing: &mut Vec<Tool>, cask_data: &[BrewCask]
                 llms_txt: None,
             },
             last_updated: None,
+            github_fetched_at: None,
         });
         added += 1;
     }
@@ -1922,8 +1839,24 @@ async fn discover_from_npm(existing: &mut Vec<Tool>, client: &reqwest::Client) {
                     continue;
                 }
 
-                let homepage = pkg["links"]["homepage"].as_str().map(String::from);
-                let repo_url = pkg["links"]["repository"].as_str().map(String::from);
+                let metadata = match client
+                    .get(format!("https://registry.npmjs.org/{name}/latest"))
+                    .send()
+                    .await
+                {
+                    Ok(response) if response.status().is_success() => {
+                        response.json::<serde_json::Value>().await.ok()
+                    }
+                    _ => None,
+                };
+                let Some(metadata) = metadata else {
+                    continue;
+                };
+                let Some(binary) = npm_binary(&metadata) else {
+                    continue;
+                };
+                let homepage = metadata["homepage"].as_str().map(String::from);
+                let repo_url = npm_repository(&metadata).map(String::from);
 
                 let category = auto_categorize(&desc, display_name);
                 let tags = generate_tags(display_name, &desc, &category);
@@ -1933,7 +1866,7 @@ async fn discover_from_npm(existing: &mut Vec<Tool>, client: &reqwest::Client) {
 
                 existing.push(Tool {
                     name: display_name.to_string(),
-                    binary: None,
+                    binary: Some(binary),
                     desc,
                     category,
                     tags,
@@ -1947,6 +1880,7 @@ async fn discover_from_npm(existing: &mut Vec<Tool>, client: &reqwest::Client) {
                         llms_txt: None,
                     },
                     last_updated: None,
+                    github_fetched_at: None,
                 });
                 added += 1;
             }
@@ -1962,12 +1896,7 @@ async fn discover_from_crates_io(existing: &mut Vec<Tool>, client: &reqwest::Cli
     let existing_names: std::collections::HashSet<String> =
         existing.iter().map(|t| t.name.to_lowercase()).collect();
 
-    let categories = [
-        "command-line-utilities",
-        "command-line-interface",
-        "development-tools",
-        "filesystem",
-    ];
+    let categories = ["command-line-utilities"];
     let mut added = 0;
     let per_category = 25; // top 25 per category by downloads
 
@@ -2019,15 +1948,26 @@ async fn discover_from_crates_io(existing: &mut Vec<Tool>, client: &reqwest::Cli
                     continue;
                 }
 
-                // Skip library-only crates (heuristic: description mentions "library" or "crate")
-                let desc_lower = desc.to_lowercase();
-                if (desc_lower.contains("library") || desc_lower.contains(" crate "))
-                    && !desc_lower.contains("tool")
-                    && !desc_lower.contains("cli")
-                    && !desc_lower.contains("command")
+                let metadata = match client
+                    .get(format!("{CRATES_IO_API}/{name}"))
+                    .header(
+                        "User-Agent",
+                        "clidex-build (https://github.com/syshin0116/clidex)",
+                    )
+                    .send()
+                    .await
                 {
+                    Ok(response) if response.status().is_success() => {
+                        response.json::<serde_json::Value>().await.ok()
+                    }
+                    _ => None,
+                };
+                let Some(metadata) = metadata else {
                     continue;
-                }
+                };
+                let Some(binary) = crate_binary(&metadata) else {
+                    continue;
+                };
 
                 let repo = krate["repository"].as_str().map(String::from);
                 let homepage = krate["homepage"].as_str().map(String::from);
@@ -2046,7 +1986,7 @@ async fn discover_from_crates_io(existing: &mut Vec<Tool>, client: &reqwest::Cli
 
                 existing.push(Tool {
                     name: name.to_string(),
-                    binary: None,
+                    binary: Some(binary),
                     desc,
                     category: category_str,
                     tags,
@@ -2060,6 +2000,7 @@ async fn discover_from_crates_io(existing: &mut Vec<Tool>, client: &reqwest::Cli
                         llms_txt: None,
                     },
                     last_updated: None,
+                    github_fetched_at: None,
                 });
                 added += 1;
             }
@@ -2183,6 +2124,7 @@ async fn discover_from_pypi(existing: &mut Vec<Tool>, client: &reqwest::Client) 
                 llms_txt: None,
             },
             last_updated: None,
+            github_fetched_at: None,
         });
         added += 1;
 
@@ -2204,6 +2146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get(AWESOME_CLI_APPS_URL)
         .send()
         .await?
+        .error_for_status()?
         .text()
         .await?;
     eprintln!("Fetched {} bytes", awesome_md.len());
@@ -2213,11 +2156,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 1b: Fetch toolleeo/cli-apps
     eprintln!("Fetching toolleeo/cli-apps...");
-    let toolleeo_apps = client.get(TOOLLEEO_APPS_URL).send().await?.text().await?;
+    let toolleeo_apps = client
+        .get(TOOLLEEO_APPS_URL)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
     let toolleeo_cats = client
         .get(TOOLLEEO_CATEGORIES_URL)
         .send()
         .await?
+        .error_for_status()?
         .text()
         .await?;
     eprintln!(
@@ -2285,21 +2235,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let brew_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()?;
-    let brew_resp = brew_client.get(HOMEBREW_FORMULA_URL).send().await?;
+    let brew_resp = brew_client
+        .get(HOMEBREW_FORMULA_URL)
+        .send()
+        .await?
+        .error_for_status()?;
     let brew_data: Vec<BrewFormula> = brew_resp.json().await?;
-    let cli_count = brew_data.iter().filter(|f| is_likely_cli(f)).count();
-    eprintln!(
-        "Fetched {} Homebrew formulae ({} likely CLI)",
-        brew_data.len(),
-        cli_count
-    );
-
-    enrich_with_homebrew(&mut tools, &brew_data);
-    let brew_matched = tools
-        .iter()
-        .filter(|t| t.install.contains_key("brew"))
-        .count();
-    eprintln!("Matched {} tools with Homebrew", brew_matched);
+    eprintln!("Fetched {} Homebrew formulae", brew_data.len());
 
     let before = tools.len();
     add_homebrew_cli_tools(&mut tools, &brew_data);
@@ -2411,6 +2353,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let with_stars = tools.iter().filter(|t| t.stars.is_some()).count();
     eprintln!("Got stars for {} tools", with_stars);
 
+    enrich_with_homebrew(&mut tools, &brew_data);
+    let brew_matched = tools
+        .iter()
+        .filter(|t| t.install.contains_key("brew"))
+        .count();
+    eprintln!("Matched {} tools with Homebrew", brew_matched);
+
     // Step 4: crates.io enrichment
     let crates_limit = std::env::var("CRATES_LIMIT")
         .ok()
@@ -2462,38 +2411,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     clidex::index::save_index(&index, std::path::Path::new(&output_path))?;
 
-    // Step 8: Generate embeddings (if semantic feature is enabled)
     #[cfg(feature = "semantic")]
     {
-        eprintln!("Generating semantic embeddings...");
-        match model2vec_rs::model::StaticModel::from_pretrained(
-            "minishlab/potion-base-2M",
+        let model = model2vec_rs::model::StaticModel::from_pretrained(
+            clidex::semantic::MODEL_ID,
             None,
             None,
             None,
-        ) {
-            Ok(model) => {
-                let texts: Vec<String> = index
-                    .tools
-                    .iter()
-                    .map(|t| format!("{} {} {}", t.name, t.desc, t.tags.join(" ")))
-                    .collect();
-                let embeddings = model.encode(&texts);
-                let dim = embeddings.first().map(|e| e.len()).unwrap_or(64);
-
-                let emb_path = std::path::Path::new(&output_path).with_extension("embeddings.bin");
-                match clidex::semantic::save_embeddings(&embeddings, dim, &emb_path) {
-                    Ok(()) => eprintln!(
-                        "Saved {} embeddings ({}d) to {:?}",
-                        embeddings.len(),
-                        dim,
-                        emb_path
-                    ),
-                    Err(e) => eprintln!("Warning: Failed to save embeddings: {}", e),
-                }
-            }
-            Err(e) => eprintln!("Warning: Failed to load model2vec: {}", e),
-        }
+        )?;
+        let texts: Vec<_> = index
+            .tools
+            .iter()
+            .map(clidex::semantic::embedding_text)
+            .collect();
+        let embeddings = model.encode(&texts);
+        let emb_path = std::path::Path::new(&output_path).with_extension("embeddings.bin");
+        clidex::semantic::save_tool_embeddings(&embeddings, &index.tools, &emb_path)?;
+        eprintln!("Saved semantic embeddings to {}", emb_path.display());
     }
 
     eprintln!("\nIndex saved to: {}", output_path);
@@ -2545,6 +2479,89 @@ fn chrono_now() -> String {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn metadata_validation_rejects_libraries_and_preserves_stale_stars() {
+        assert_eq!(npm_binary(&serde_json::json!({"name":"chalk"})), None);
+        assert_eq!(
+            npm_binary(&serde_json::json!({"name":"@scope/cli", "bin":{"run-cli":"index.js"}})),
+            Some("run-cli".into())
+        );
+        assert_eq!(
+            crate_binary(
+                &serde_json::json!({"crate":{"max_stable_version":"1.0"},"versions":[{"num":"1.0","bin_names":[]}]})
+            ),
+            None
+        );
+        assert_eq!(
+            crate_binary(
+                &serde_json::json!({"crate":{"max_stable_version":"1.0"},"versions":[{"num":"1.0","bin_names":["rg"]}]})
+            ),
+            Some("rg".into())
+        );
+        assert!(same_repository(
+            Some("git+https://github.com/Owner/Repo.git"),
+            Some("https://github.com/owner/repo/releases/v1")
+        ));
+        assert!(!same_repository(
+            Some("https://github.com/kislyuk/yq"),
+            Some("https://github.com/mikefarah/yq")
+        ));
+        let mut tool: Tool = serde_json::from_value(serde_json::json!({
+            "name":"yq", "desc":"YAML processor", "category":"Data",
+            "links":{"repo":"https://github.com/kislyuk/yq"}
+        }))
+        .unwrap();
+        let formula: BrewFormula = serde_json::from_value(serde_json::json!({
+            "name":"yq", "homepage":"https://github.com/mikefarah/yq"
+        }))
+        .unwrap();
+        enrich_with_homebrew(std::slice::from_mut(&mut tool), &[formula]);
+        assert!(tool.install.is_empty());
+        let correct: BrewFormula = serde_json::from_value(serde_json::json!({
+            "name":"python-yq", "homepage":"https://github.com/kislyuk/yq"
+        }))
+        .unwrap();
+        enrich_with_homebrew(std::slice::from_mut(&mut tool), &[correct]);
+        assert_eq!(tool.install["brew"], "brew install python-yq");
+        let formulae: Vec<BrewFormula> = serde_json::from_value(serde_json::json!([
+            {"name":"vegeta","desc":"HTTP load testing tool and library","homepage":"https://github.com/tsenart/vegeta"},
+            {"name":"libuv","desc":"Multi-platform support library","homepage":"https://github.com/libuv/libuv"}
+        ])).unwrap();
+        let mut discovered = Vec::new();
+        discover_from_homebrew(&mut discovered, &formulae, &HashMap::new());
+        assert_eq!(
+            discovered
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["vegeta"]
+        );
+
+        let mut other = tool.clone();
+        other.links.repo = Some("https://github.com/mikefarah/yq".into());
+        let mut distinct = vec![tool.clone(), other];
+        deduplicate(&mut distinct);
+        assert_eq!(distinct.len(), 2);
+        assert!(is_cache_fresh(Some(1000), 1001, 3));
+        assert!(!is_cache_fresh(Some(1000), 1000 + 3 * 86400, 3));
+        assert!(!is_cache_fresh(None, 1001, 3));
+        tool.stars = Some(42);
+        tool.last_updated = Some("2020-01-01T00:00:00Z".into());
+        let cache = HashMap::from([(("kislyuk".into(), "yq".into()), tool.clone())]);
+        tool.stars = None;
+        enrich_with_github(
+            std::slice::from_mut(&mut tool),
+            &reqwest::Client::new(),
+            0,
+            &cache,
+            3,
+        )
+        .await;
+        assert_eq!(tool.stars, Some(42));
+        assert_eq!(tool.last_updated.as_deref(), Some("2020-01-01T00:00:00Z"));
+        assert_eq!(tool.github_fetched_at, None);
+    }
+
     #[test]
     fn add_manual_tools_includes_required_terraform_metadata() {
         let mut tools = Vec::new();
@@ -2579,6 +2596,7 @@ mod tests {
             brew_installs_365d: None,
             links: Links::default(),
             last_updated: None,
+            github_fetched_at: None,
         }];
 
         add_manual_tools(&mut tools);
