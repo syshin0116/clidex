@@ -2456,7 +2456,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         *cats.entry(top.to_string()).or_default() += 1;
     }
     let mut cats_sorted: Vec<_> = cats.into_iter().collect();
-    cats_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    cats_sorted.sort_by_key(|category| std::cmp::Reverse(category.1));
     eprintln!("\nCategories:");
     for (cat, count) in cats_sorted.iter().take(20) {
         eprintln!("  {:30} {}", cat, count);
