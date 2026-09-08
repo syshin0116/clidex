@@ -5,7 +5,7 @@
   <strong>CLI tool discovery for AI agents</strong>
 </p>
 <p align="center">
-  Search, compare, and install 4,904+ command-line tools with structured YAML/JSON output.
+  Search, compare, and install 4,905+ command-line tools with structured YAML/JSON output.
 </p>
 <p align="center">
   <a href="https://github.com/syshin0116/clidex/actions/workflows/ci.yml"><img src="https://github.com/syshin0116/clidex/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
