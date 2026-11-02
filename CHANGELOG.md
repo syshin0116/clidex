@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update rustls, rustls-webpki, quinn-proto, and webpki roots to clear RUSTSEC-2026-0285, -0338 to -0342, -0346, -0348, -0349, and -0381 to -0383.
 - Resolve dependencies against the declared MSRV (`resolver = "3"`) and build release binaries with `--locked`.
+- Replace the deprecated `serde_yaml` (unmaintained `unsafe-libyaml`, RUSTSEC-2024-0449) with the API-compatible `serde_norway`; YAML output is unchanged.
+- Audit dependencies weekly so advisories published between code changes surface as issues.
+- Report a missing home directory as an error that points to `CLIDEX_INDEX_PATH` instead of panicking.
+- Round the README tool count down to the hundred so the index job stops committing daily.
 
 ### Fixed
 

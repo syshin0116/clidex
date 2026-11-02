@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 pub fn load_index() -> Result<Index, String> {
-    let path = config::index_path();
+    let path = config::index_path()?;
     if !path.exists() {
         return Err(format!(
             "Index not found at {}. Run `clidex update` to download it.",
@@ -17,7 +17,7 @@ pub fn load_index() -> Result<Index, String> {
 
 fn parse_index(content: &str) -> Result<Index, String> {
     let index: Index =
-        serde_yaml::from_str(content).map_err(|error| format!("Invalid index: {error}"))?;
+        serde_norway::from_str(content).map_err(|error| format!("Invalid index: {error}"))?;
     if index.version != 1 || index.tools.is_empty() {
         return Err("Unsupported index version or empty tool index".into());
     }
@@ -25,7 +25,7 @@ fn parse_index(content: &str) -> Result<Index, String> {
 }
 
 pub async fn update_index() -> Result<usize, String> {
-    let path = config::index_path();
+    let path = config::index_path()?;
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -64,7 +64,7 @@ pub async fn update_index() -> Result<usize, String> {
                 bytes.len() as u64,
                 &index.tools,
             )?;
-            write_atomic(&config::embeddings_path(), &bytes)?;
+            write_atomic(&config::embeddings_path()?, &bytes)?;
             Ok::<_, Box<dyn std::error::Error>>(())
         }
         .await;
@@ -145,7 +145,7 @@ pub struct IndexStats {
 
 pub fn save_index(index: &Index, path: &Path) -> Result<(), String> {
     let yaml =
-        serde_yaml::to_string(index).map_err(|e| format!("Failed to serialize index: {e}"))?;
+        serde_norway::to_string(index).map_err(|e| format!("Failed to serialize index: {e}"))?;
     write_atomic(path, yaml.as_bytes())?;
     Ok(())
 }

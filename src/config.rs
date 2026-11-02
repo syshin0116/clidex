@@ -1,15 +1,16 @@
 use std::path::PathBuf;
 
-pub fn clidex_dir() -> PathBuf {
+pub fn clidex_dir() -> Result<PathBuf, String> {
     dirs::home_dir()
-        .expect("Could not find home directory")
-        .join(".clidex")
+        .map(|home| home.join(".clidex"))
+        .ok_or_else(|| "Could not find home directory; set CLIDEX_INDEX_PATH".into())
 }
 
-pub fn index_path() -> PathBuf {
-    std::env::var_os("CLIDEX_INDEX_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| clidex_dir().join("index.yaml"))
+pub fn index_path() -> Result<PathBuf, String> {
+    match std::env::var_os("CLIDEX_INDEX_PATH") {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(clidex_dir()?.join("index.yaml")),
+    }
 }
 
 pub const INDEX_URL: &str =
@@ -17,8 +18,8 @@ pub const INDEX_URL: &str =
 
 pub const DEFAULT_MAX_RESULTS: usize = 10;
 
-pub fn embeddings_path() -> std::path::PathBuf {
-    index_path().with_extension("embeddings.bin")
+pub fn embeddings_path() -> Result<PathBuf, String> {
+    Ok(index_path()?.with_extension("embeddings.bin"))
 }
 
 pub const EMBEDDINGS_URL: &str =
