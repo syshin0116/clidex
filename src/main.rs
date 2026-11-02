@@ -64,10 +64,12 @@ enum Commands {
         #[arg(required = true)]
         names: Vec<String>,
     },
+    /// Serve the index to MCP clients over stdio
+    Mcp,
     /// Show popular tools sorted by GitHub stars
     Trending {
         /// Only include tools updated on or after YYYY-MM-DD
-        #[arg(long, value_parser = parse_date)]
+        #[arg(long, value_parser = search::parse_date)]
         updated_since: Option<String>,
     },
 }
@@ -168,29 +170,6 @@ fn parse_max_results(value: &str) -> Result<usize, String> {
     match value.parse::<usize>() {
         Ok(0) | Err(_) => Err("expected a positive integer".into()),
         Ok(count) => Ok(count),
-    }
-}
-
-/// Accept only `YYYY-MM-DD`, which compares correctly with index dates as a string.
-fn parse_date(value: &str) -> Result<String, String> {
-    let bytes = value.as_bytes();
-    let well_formed = bytes.len() == 10
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(position, byte)| match position {
-                4 | 7 => *byte == b'-',
-                _ => byte.is_ascii_digit(),
-            });
-    let month = value.get(5..7).and_then(|month| month.parse::<u8>().ok());
-    let day = value.get(8..10).and_then(|day| day.parse::<u8>().ok());
-    if well_formed
-        && month.is_some_and(|month| (1..=12).contains(&month))
-        && day.is_some_and(|day| (1..=31).contains(&day))
-    {
-        Ok(value.to_owned())
-    } else {
-        Err("expected a date in YYYY-MM-DD format".into())
     }
 }
 
@@ -471,23 +450,27 @@ async fn run(cli: Cli, format: Format) -> Result<(), CliError> {
         }
         Some(Commands::Trending { updated_since }) => {
             let idx = load_or_download().await?;
-            let mut tools = cli
-                .category
-                .as_ref()
-                .map(|cat| search::filter_by_category(&idx.tools, cat))
-                .unwrap_or(idx.tools);
-            tools.retain(|tool| {
-                tool.stars.is_some()
-                    && updated_since.as_ref().is_none_or(|since| {
-                        tool.last_updated.as_ref().is_some_and(|date| date >= since)
-                    })
-            });
-            tools.sort_by_key(|tool| std::cmp::Reverse(tool.stars.unwrap_or(0)));
-            tools.truncate(cli.max_results.unwrap_or(20));
+            let tools = search::trending(
+                &idx.tools,
+                cli.category.as_deref(),
+                updated_since.as_deref(),
+                cli.max_results.unwrap_or(20),
+            );
             if tools.is_empty() {
                 eprintln!("No trending tools found");
             }
             output::print_tools(&tools, format, fields);
+        }
+        Some(Commands::Mcp) => {
+            // An MCP client starts the server without a terminal, so download a
+            // missing index here instead of requiring a separate `clidex update`.
+            if !config::index_path()?.exists() {
+                index::update_index()
+                    .await
+                    .map_err(error_as(ErrorKind::UpdateFailed))?;
+            }
+            let idx = load_or_download().await?;
+            clidex::mcp::serve_stdio(idx.tools).await?;
         }
         Some(Commands::Stats) => {
             let stats = index::index_stats(&load_or_download().await?);
@@ -502,12 +485,7 @@ async fn run(cli: Cli, format: Format) -> Result<(), CliError> {
             };
             let mut categories = search::get_categories(&load_or_download().await?.tools);
             if let Some(filter) = filter {
-                let filter = filter.to_lowercase();
-                categories.retain(|(name, _)| {
-                    let name = name.to_lowercase();
-                    name.contains(&filter)
-                        || filter.split_whitespace().any(|word| name.contains(word))
-                });
+                search::filter_categories(&mut categories, &filter);
             }
             output::print_categories(&categories, format);
         }
