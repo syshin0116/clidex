@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audit dependencies weekly so advisories published between code changes surface as issues.
 - Report a missing home directory as an error that points to `CLIDEX_INDEX_PATH` instead of panicking.
 - Round the README tool count down to the hundred so the index job stops committing daily.
+- Verify downloaded indexes against a published SHA-256 checksum and attest index provenance (`gh attestation verify index.yaml -R syshin0116/clidex`).
 
 ### Fixed
 
@@ -25,12 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve cached GitHub metadata on refresh failure and expire it by fetch time.
 - Fail explicit real-index tests on missing, malformed, or undersized inputs; test the builder in PR CI and search rankings before index publication.
 - Validate semantic vectors without unsafe reads and bind published embeddings to their model and ordered input texts.
+- Reject `-n 0`, empty queries, and malformed `trending --updated-since` dates as usage errors (exit 2) instead of returning empty results.
+- Every index command, not only search, downloads a missing index in interactive terminals.
 
 ### Added
 
 - `batch` searches multiple queries with one index load and engine build.
 - `CLIDEX_INDEX_PATH` selects an isolated index and adjacent embeddings file.
 - Structured stats output and semantic embedding downloads for semantic builds.
+- `clidex update` sends `If-None-Match` and skips the download when the index is unchanged.
+- Warn on stderr when the index is more than 14 days old; set `CLIDEX_NO_STALE_WARNING` to silence it.
 
 ## [0.4.0] - 2026-04-07
 

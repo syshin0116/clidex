@@ -72,6 +72,31 @@ tools:
         serde_json::from_slice::<serde_json::Value>(&stats.stdout).unwrap()["total"],
         3
     );
+    for args in [
+        vec!["jq", "-n", "0"],
+        vec!["search", ""],
+        vec!["batch", "jq", ""],
+        vec!["trending", "--updated-since", "yesterday"],
+        vec!["trending", "--updated-since", "2026-8-01"],
+        vec!["trending", "--updated-since", "2026-13-01"],
+    ] {
+        assert_eq!(
+            run(&args).status.code(),
+            Some(2),
+            "{args:?} must be a usage error"
+        );
+    }
+    let since = run(&["trending", "--updated-since", "2026-01-01", "--json"]);
+    assert!(since.status.success(), "{:?}", since.stderr);
+    let stale = String::from_utf8(run(&["stats", "--json"]).stderr).unwrap();
+    assert!(stale.contains("days old"), "{stale}");
+    let quiet = Command::new(env!("CARGO_BIN_EXE_clidex"))
+        .env("CLIDEX_INDEX_PATH", &path)
+        .env("CLIDEX_NO_STALE_WARNING", "1")
+        .args(["stats", "--json"])
+        .output()
+        .unwrap();
+    assert!(quiet.stderr.is_empty(), "{:?}", quiet.stderr);
     std::fs::write(&path, "version: 1\ngenerated: test\ntools: []\n").unwrap();
     assert!(!run(&["jq", "--json"]).status.success());
     std::fs::write(&path, "not valid: [").unwrap();
