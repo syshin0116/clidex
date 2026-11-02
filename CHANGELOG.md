@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Update rustls, rustls-webpki, quinn-proto, and webpki roots to clear RUSTSEC-2026-0285, -0338 to -0342, -0346, -0348, -0349, and -0381 to -0383.
+- Resolve dependencies against the declared MSRV (`resolver = "3"`) and build release binaries with `--locked`.
+
 ### Fixed
 
 - Return empty arrays for empty JSON/YAML searches, categories, and trending results.
