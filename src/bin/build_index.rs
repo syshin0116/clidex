@@ -509,7 +509,7 @@ fn same_repository(a: Option<&str>, b: Option<&str>) -> bool {
 fn load_stars_cache(path: &str) -> HashMap<(String, String), Tool> {
     let index: Index = match std::fs::read_to_string(path)
         .ok()
-        .and_then(|content| serde_yaml::from_str(&content).ok())
+        .and_then(|content| serde_norway::from_str(&content).ok())
     {
         Some(index) => index,
         None => return HashMap::new(),
@@ -2403,11 +2403,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tools,
     };
 
-    let output_path = std::env::args().nth(1).unwrap_or_else(|| {
-        let dir = clidex::config::clidex_dir();
-        std::fs::create_dir_all(&dir).ok();
-        dir.join("index.yaml").to_string_lossy().to_string()
-    });
+    let output_path = match std::env::args().nth(1) {
+        Some(path) => path,
+        None => {
+            let dir = clidex::config::clidex_dir()?;
+            std::fs::create_dir_all(&dir).ok();
+            dir.join("index.yaml").to_string_lossy().to_string()
+        }
+    };
 
     clidex::index::save_index(&index, std::path::Path::new(&output_path))?;
 

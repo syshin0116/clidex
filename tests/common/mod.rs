@@ -1,5 +1,5 @@
 pub fn load_real_index() -> Option<Vec<clidex::model::Tool>> {
-    let path = clidex::config::index_path();
+    let path = clidex::config::index_path().expect("index path must resolve");
     if !path.exists() && std::env::var_os("CLIDEX_INDEX_PATH").is_none() {
         return None;
     }

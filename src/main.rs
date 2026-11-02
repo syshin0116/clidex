@@ -83,9 +83,10 @@ fn get_format(pretty: bool, json: bool, yaml: bool) -> Format {
 /// Load index, auto-downloading on first run if interactive TTY.
 /// Non-interactive (pipes, CI) gets an error with instructions instead.
 async fn load_or_download() -> Result<clidex::model::Index, String> {
+    let path = config::index_path()?;
     match index::load_index() {
         Ok(i) => Ok(i),
-        Err(_) if !config::index_path().exists() => {
+        Err(_) if !path.exists() => {
             if std::io::stdin().is_terminal() {
                 // Auto-download in an interactive terminal.
                 eprintln!("Index not found. Downloading from {}...", config::INDEX_URL);
@@ -96,7 +97,7 @@ async fn load_or_download() -> Result<clidex::model::Index, String> {
                 // Do not make silent network calls in CI or a pipe.
                 Err(format!(
                     "Index not found at {}. Run `clidex update` first.",
-                    config::index_path().display()
+                    path.display()
                 ))
             }
         }
@@ -196,19 +197,19 @@ async fn run() -> Result<(), String> {
             };
             let mut idx = load_or_download().await?;
             #[cfg(feature = "semantic")]
-            let semantic =
-                clidex::semantic::load_tool_embeddings(&config::embeddings_path(), &idx.tools)
+            let semantic = config::embeddings_path()
+                .ok()
+                .and_then(|path| clidex::semantic::load_tool_embeddings(&path, &idx.tools).ok())
+                .and_then(|embeddings| {
+                    model2vec_rs::model::StaticModel::from_pretrained(
+                        clidex::semantic::MODEL_ID,
+                        None,
+                        None,
+                        None,
+                    )
                     .ok()
-                    .and_then(|embeddings| {
-                        model2vec_rs::model::StaticModel::from_pretrained(
-                            clidex::semantic::MODEL_ID,
-                            None,
-                            None,
-                            None,
-                        )
-                        .ok()
-                        .map(|model| (model, embeddings))
-                    });
+                    .map(|model| (model, embeddings))
+                });
             let selected: Vec<_> = idx
                 .tools
                 .iter()

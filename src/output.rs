@@ -47,11 +47,11 @@ pub fn print_search_results(results: &[SearchResult], format: Format, show_score
                         tool: &r.tool,
                     })
                     .collect();
-                let yaml = serde_yaml::to_string(&items).expect("Failed to serialize to YAML");
+                let yaml = serde_norway::to_string(&items).expect("Failed to serialize to YAML");
                 print!("{yaml}");
             } else {
                 let tools: Vec<&Tool> = results.iter().map(|r| &r.tool).collect();
-                let yaml = serde_yaml::to_string(&tools).expect("Failed to serialize to YAML");
+                let yaml = serde_norway::to_string(&tools).expect("Failed to serialize to YAML");
                 print!("{yaml}");
             }
         }
@@ -116,7 +116,7 @@ pub fn print_batch_results(
         ),
         Format::Yaml => print!(
             "{}",
-            serde_yaml::to_string(&items).expect("YAML serialization")
+            serde_norway::to_string(&items).expect("YAML serialization")
         ),
         Format::Pretty => {
             for (query, results) in results {
@@ -135,7 +135,7 @@ pub fn print_stats(stats: &crate::index::IndexStats, format: Format) {
         ),
         Format::Yaml => print!(
             "{}",
-            serde_yaml::to_string(stats).expect("YAML serialization")
+            serde_norway::to_string(stats).expect("YAML serialization")
         ),
         Format::Pretty => {
             println!("Index version: {}", stats.version);
@@ -194,7 +194,7 @@ fn print_search_result_pretty(result: &SearchResult, show_score: bool, width: us
 pub fn print_tools(tools: &[Tool], format: Format) {
     match format {
         Format::Yaml => {
-            let yaml = serde_yaml::to_string(tools).expect("Failed to serialize to YAML");
+            let yaml = serde_norway::to_string(tools).expect("Failed to serialize to YAML");
             print!("{yaml}");
         }
         Format::Json => {
@@ -216,7 +216,7 @@ pub fn print_tools(tools: &[Tool], format: Format) {
 pub fn print_tool_detail(tool: &Tool, format: Format) {
     match format {
         Format::Yaml => {
-            let yaml = serde_yaml::to_string(tool).expect("Failed to serialize to YAML");
+            let yaml = serde_norway::to_string(tool).expect("Failed to serialize to YAML");
             print!("{yaml}");
         }
         Format::Json => {
@@ -236,7 +236,7 @@ pub fn print_categories(cats: &[(String, usize)], format: Format) {
                 .iter()
                 .map(|(name, count)| serde_json::json!({ "name": name, "count": count }))
                 .collect();
-            let yaml = serde_yaml::to_string(&map).expect("Failed to serialize to YAML");
+            let yaml = serde_norway::to_string(&map).expect("Failed to serialize to YAML");
             print!("{yaml}");
         }
         Format::Json => {
