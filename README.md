@@ -16,307 +16,164 @@
 
 ---
 
-## Quickstart
+AI agents like Claude Code, Codex, and Gemini CLI can run any terminal command, but they only know the tools they saw in training. They reach for `grep` when `ripgrep` is faster, or `find` when `fd` is simpler.
 
-```bash
-# Install
-cargo install clidex            # or: curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
-
-# Search (auto-downloads index on first run)
-clidex "json processor"         # Pretty output in terminal, YAML in pipes
-clidex "json processor" --json  # JSON output
-clidex info jq                  # Detailed tool info
-clidex compare jq dasel yq      # Side-by-side comparison
-```
-
----
-
-## Why Clidex?
-
-AI agents like Claude Code, Codex, and Gemini CLI can run terminal commands, but they don't know which tools exist beyond the basics. An agent uses `grep` when `ripgrep` is 10x faster, or `find` when `fd` is simpler.
-
-**Clidex bridges this gap.** It's a local CLI that returns structured metadata about CLI tools: what they do, how to install them, and where to find docs. No web search API calls, no HTML parsing, and no cost. It is a fast local lookup.
+Clidex is a local index of command-line tools that agents can query: what each tool does, how to install it on this machine, how to use it, and where its docs are. Lookups run offline against a cached index, so there is no web search, no API key, and no per-query cost.
 
 <p align="center">
   <img src="assets/demo.gif" alt="clidex demo" width="600">
 </p>
 
-### What makes it different
-
-| | awesome-cli-apps / cli-anything | Clidex |
-|--|------|------|
-| Target user | Humans | AI agents (+ humans) |
-| Output | Markdown / TUI | YAML / JSON / Pretty |
-| Install info | Links only | `brew install jq`, ready to run |
-| Docs access | Click a link | `llms.txt` URL for agents to read |
-| Pipeline | No | `clidex ... \| next_tool` (YAML in pipes) |
-| Compare | No | `clidex compare jq dasel yq` |
-
----
-
-## Installation
-
-### With Cargo (all platforms)
+## Quickstart
 
 ```bash
-cargo install clidex
+cargo install clidex     # or: curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
+clidex update            # download the index (about 330 KB)
+
+clidex "json processor"           # pretty in a terminal, YAML in a pipe
+clidex info jq --json             # one tool, every field
+clidex compare jq dasel yq        # side by side
 ```
 
-### Pre-built binaries
+## Use it from an agent
 
-**Linux / macOS:**
+**MCP server.** Any MCP client can call clidex directly:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh | sh
+claude mcp add clidex -- clidex mcp
 ```
 
-**Windows:**
+```json
+{ "mcpServers": { "clidex": { "command": "clidex", "args": ["mcp"] } } }
+```
+
+It exposes `search_tools`, `tool_info`, `compare_tools`, `trending_tools`, and `list_categories`. All are read-only and return typed `structuredContent`.
+
+**Agent skill.** Copy [`skills/clidex`](skills/clidex/SKILL.md) into your agent's skills directory (for Claude Code, `~/.claude/skills/`). It tells the agent when to search and to ask before installing.
+
+**Plain CLI.** Request JSON and only the fields you need:
 
 ```bash
-curl -fsSL -o clidex.zip https://github.com/syshin0116/clidex/releases/latest/download/clidex-x86_64-pc-windows-msvc.zip
-tar -xf clidex.zip
-move clidex.exe %USERPROFILE%\.local\bin\
+clidex "convert csv to json" --json --fields name,desc,install,examples -n 3
+clidex info ripgrep --json --fields name,install,examples
 ```
 
-Or download directly from [Releases](https://github.com/syshin0116/clidex/releases/latest).
+```json
+{
+  "name": "ripgrep",
+  "install": {
+    "apk": "apk add ripgrep",
+    "brew": "brew install ripgrep",
+    "cargo": "cargo install ripgrep",
+    "pacman": "pacman -S ripgrep",
+    "scoop": "scoop install ripgrep"
+  },
+  "examples": [
+    { "command": "rg {{pattern}}", "description": "Recursively search current directory for a pattern (`regex`)" },
+    { "command": "rg {{pattern}} {{path/to/file_or_directory}}", "description": "Recursively search for a pattern in a file or directory" },
+    { "command": "rg {{[-F|--fixed-strings]}} -- {{string}}", "description": "Search for a literal string pattern" }
+  ]
+}
+```
 
-> **Note:** In an interactive terminal, the index is downloaded automatically on first search. In non-interactive environments (CI, pipes), run `clidex update` first.
+Exit codes, the error object on stderr, and the schema versioning policy are in the [output contract](docs/agent-integration.md#output-contract).
 
----
+## What an entry contains
+
+| Field | Example | Source |
+|-------|---------|--------|
+| `install` | `brew`, `cargo`, `npm`, `pipx`, `pacman`, `apk`, `scoop` commands | Homebrew, crates.io, npm, PyPI, Repology |
+| `examples` | up to three tldr examples, `{{...}}` marks a placeholder | [tldr-pages](https://github.com/tldr-pages/tldr) |
+| `stars`, `last_updated` | GitHub stars and last push | GitHub API |
+| `brew_installs_365d` | Homebrew installs in the last year | Homebrew analytics |
+| `links` | `repo`, `homepage`, `docs`, `llms_txt` | GitHub, project sites |
+
+`llms_txt` points to an [llms.txt](https://llmstxt.org/) file an agent can fetch to learn the tool. The full field list is in [`src/model.rs`](src/model.rs).
 
 ## Usage
 
-### Search
-
 ```bash
-clidex "json processor"             # Pretty in terminal, YAML in pipes
-clidex "json processor" --yaml      # Force YAML output
-clidex "json processor" --json      # JSON output
-clidex "json processor" --pretty    # Force pretty output
-clidex "file manager" -n 3          # Limit to top 3 results
-clidex "json processor" --score     # Include relevance scores
+clidex "file manager" -n 3 --score         # top 3 with relevance scores
+clidex search "git diff" --category git    # explicit form, filtered by category
+clidex batch "json processor" "git diff"   # several queries, one index load
+clidex info ripgrpe                        # typo -> "Did you mean: ripgrep"
+clidex trending --updated-since 2026-01-01 # most starred, recently active
+clidex categories git                      # category names and counts
+clidex --category docker -n 5              # browse a category
+clidex stats                               # index size, coverage, schema version
 ```
 
-For multiple queries, load the index once:
+Output is pretty on a terminal and YAML in a pipe. `--json`, `--yaml`, and `--pretty` force a format. Common flags work before or after the subcommand.
 
-```bash
-clidex batch "json processor" "git diff" --json
-```
+## Keeping the index fresh
 
-Batch output is `[{"query": "...", "results": [...]}]`. Empty results are `[]`,
-including single searches. Common flags work before or after the subcommand.
+The index is rebuilt every day by [GitHub Actions](.github/workflows/build-index.yml) and published as a [release asset](https://github.com/syshin0116/clidex/releases/tag/index).
 
-Search also works as an explicit subcommand:
-
-```bash
-clidex search "json processor" --category data -n 5
-```
-
-Example output (terminal):
-
-```
-  jq                ★ 34.0k  Data Manipulation > Processors [68.7]
-  JSON processor
-  $ brew install jq
-
-  dasel              ★ 7.9k  Data Manipulation > Processors [60.7]
-  JSON/YAML/TOML/XML processor (like jq/yq)
-  $ brew install dasel
-```
-
-### Tool info
-
-```bash
-clidex info ripgrep               # Detailed tool metadata
-clidex info ripgrpe               # Typo → "Did you mean: ripgrep"
-```
-
-### Compare tools
-
-```bash
-clidex compare jq dasel yq         # Side-by-side comparison
-```
-
-```
-                jq                              dasel                           yq
-                ──────────────────────────────  ──────────────────────────────  ──────────────────
-Description     JSON processor                  JSON/YAML/TOML/XML processor…   YAML processor
-Category        Processors                      Processors                      Processors
-Stars           ★ 30.8k                         ★ 5.3k                          ★ 2.6k
-Install         brew install jq                 brew install dasel              brew install python-yq
-```
-
-### Trending
-
-```bash
-clidex trending                    # Top tools by GitHub stars
-clidex trending -n 10              # Top 10
-clidex trending --category git     # Top Git tools
-clidex trending --updated-since 2026-01-01 # Filter by repo activity date
-```
-
-### Categories
-
-```bash
-clidex categories                  # List all categories with tool counts
-clidex categories git              # Filter categories by name
-clidex --category docker -n 5      # Browse tools in a category
-```
-
-### Index management
-
-```bash
-clidex update                      # Download/update index
-clidex stats                       # Show index statistics
-```
-
-### Output format
-
-| Flag | Format | When |
-|------|--------|------|
-| *(none, terminal)* | Pretty | Auto-detected when stdout is a TTY |
-| *(none, pipe)* | YAML | Auto-detected when stdout is piped |
-| `--pretty` | Pretty | Force human-friendly table |
-| `--yaml` | YAML | Force structured YAML |
-| `--json` | JSON | Force JSON |
-| `--score` | + Score | Add relevance scores to results |
-
-### Other flags
-
-| Flag | Description |
-|------|-------------|
-| `-n <N>` | Max number of results (default: 10) |
-
----
-
-## Agent integration
-
-Clidex is built for AI agents to consume programmatically. The typical workflow:
-
-1. Agent runs `clidex "task description"` (YAML output when piped)
-2. Parses the structured result
-3. Extracts `install.brew` or `install.cargo` command
-4. Installs and uses the tool
-
-### Output schema
-
-Each tool in the result contains:
-
-```yaml
-name: string            # Tool name
-binary: string?         # Binary name (if different from name)
-desc: string            # One-line description
-category: string        # Category path (e.g. "Files and Directories > Search")
-tags: [string]          # Search tags
-install:                # Install commands by package manager
-  brew: string?
-  cargo: string?
-  npm: string?
-  pipx: string?
-stars: number?          # GitHub stars
-links:
-  repo: string?         # GitHub repository
-  homepage: string?     # Project homepage
-  docs: string?         # Documentation URL
-  llms_txt: string?     # llms.txt URL (LLM-readable docs)
-```
-
-With `--score`, search results use a wrapper schema: `{score: number, ...tool}`. Without `--score`, output is plain `[Tool]`, the same schema as `info`/`compare`/`trending`.
-
-The `llms_txt` field is especially useful because it points to [llms.txt](https://llmstxt.org/) files that agents can fetch to learn how to use a tool.
-
-See [agent integration examples](docs/agent-integration.md) for a safe subprocess
-workflow and reusable Codex or Claude Code instructions.
-
----
+- `clidex update` sends the stored ETag, so it only downloads when the index changed, and fetches the zstd-compressed copy.
+- Downloads are checked against the published SHA-256. Each build is also attested, so you can verify where an index came from:
+  `gh attestation verify ~/.clidex/index.yaml -R syshin0116/clidex`
+- Commands print a warning on stderr when the local index is more than 14 days old.
+- In an interactive terminal, a missing index is downloaded on first use. Pipes and CI get exit code 3 instead of a silent network call. `clidex mcp` always downloads a missing index, because MCP clients start it without a terminal.
 
 ## How search works
 
-Clidex uses **BM25** text search with domain-specific optimizations:
+BM25 over tool name (3x), tags and category (2x), and description (1x), plus:
 
-- **Field weighting**: Tool name (3x) > tags + category (2x) > description (1x)
-- **Synonym expansion**: `grep` → also matches `search`, `find`, `ripgrep`, `rg` (30+ synonym groups)
-- **Intent coverage**: Bonuses based on how many query terms appear in tool metadata
-- **Category boost**: Query terms matching category names get boosted
-- **Popularity boost**: GitHub stars or Homebrew install counts add 0 to 8 bonus points (tie-breaker, not primary signal)
-- **Fuzzy matching**: Catches typos via edit distance (`ripgrpe` → `ripgrep`) and subsequence matching
-- **Alias mapping**: `rg` → ripgrep, `btm` → bottom, `z` → zoxide (24 pairs)
-- **Confidence gates**: Minimum lexical evidence required to prevent false positives from garbage queries
+- synonym expansion (`grep` also matches `search`, `ripgrep`, `rg`) and alias mapping (`rg` -> ripgrep, `z` -> zoxide)
+- bonuses for query-term coverage and matching category names
+- a small popularity boost from stars and Homebrew installs, used as a tie-breaker
+- typo tolerance through edit distance and subsequence matching
+- confidence gates, so nonsense queries return `[]` instead of noise
 
-Search calculation takes a few milliseconds with a cached BM25 engine. Each
-standalone CLI invocation also loads YAML and builds the engine. Use `batch` to
-share that startup cost across queries; measure complete CLI invocations when
-comparing application latency.
+A search takes a few milliseconds once the engine is built. Each CLI call also loads the index (about 0.25 s), so `batch` and `clidex mcp` are faster for repeated queries.
 
----
+Builds with `--features semantic` add Model2Vec embeddings fused with BM25. Release binaries leave it out: it nearly doubles the binary (4.4 MB to 7.3 MB) and downloads a model from Hugging Face on first search.
 
 ## Data sources
 
-| Source | What it provides |
-|--------|-----------------|
-| [awesome-cli-apps](https://github.com/agarrharr/awesome-cli-apps) | Curated tool list with categories |
-| [toolleeo/cli-apps](https://github.com/toolleeo/cli-apps) | 2,200+ tools from CSV |
-| [modern-unix](https://github.com/ibraheemdev/modern-unix) | Modern replacements for classic tools |
-| [awesome-tuis](https://github.com/rothgar/awesome-tuis) | Terminal UI applications |
-| [Homebrew](https://formulae.brew.sh/) | `brew install` commands, formulae + casks |
-| [GitHub API](https://docs.github.com/en/rest) | Stars, last updated, homepage |
-| [crates.io](https://crates.io/) | `cargo install` commands + category-based discovery |
-| [npm](https://www.npmjs.com/) | `npm install -g` commands |
-| [PyPI](https://pypi.org/) | `pipx install` commands for Python CLI tools |
-| [Homebrew analytics](https://formulae.brew.sh/analytics/) | 365-day install counts |
-| [llms.txt](https://llmstxt.org/) | LLM-readable documentation probing |
+| Source | Provides |
+|--------|----------|
+| [awesome-cli-apps](https://github.com/agarrharr/awesome-cli-apps), [toolleeo/cli-apps](https://github.com/toolleeo/cli-apps), [modern-unix](https://github.com/ibraheemdev/modern-unix), [awesome-tuis](https://github.com/rothgar/awesome-tuis) | Curated tools and categories |
+| [Homebrew](https://formulae.brew.sh/) formulae, casks, and analytics | `brew install` commands, install counts |
+| [crates.io](https://crates.io/), [npm](https://www.npmjs.com/), [PyPI](https://pypi.org/) | Discovery plus `cargo`, `npm`, and `pipx` commands |
+| [Repology](https://repology.org/) | `pacman`, `apk`, and `scoop` commands for Homebrew formulae |
+| [tldr-pages](https://github.com/tldr-pages/tldr) (CC BY 4.0) | Usage examples |
+| [GitHub API](https://docs.github.com/en/rest) | Stars, last push, homepage |
+| [llms.txt](https://llmstxt.org/) probing | LLM-readable documentation links |
 
-The index is rebuilt daily via GitHub Actions and published as a [release asset](https://github.com/syshin0116/clidex/releases/tag/index).
+Install commands and examples are attached only when the source can be tied to the same project: npm and crates.io entries must declare a binary and the same repository, Repology projects must contain the same Homebrew formula, and tldr pages must link to the tool's repository or homepage. Coverage is lower as a result, but agents don't get commands for the wrong package.
 
----
-
-## Build index locally
+## Build the index locally
 
 ```bash
-cargo run --features index-builder --bin build_index -- index.yaml
+cargo run --release --features index-builder --bin build_index -- index.yaml [previous-index.yaml]
 ```
 
-To build and download semantic embeddings, compile with `--features semantic`.
-The index builder needs `--features index-builder,semantic` to produce both files.
-Embeddings include their model identifier and ordered input texts. Old or
-mismatched files fall back to lexical search; run `clidex update` to refresh them.
-
-### Environment variables
+The previous index, when given, supplies cached GitHub and Repology results.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLIDEX_INDEX_PATH` | `~/.clidex/index.yaml` | Override the index path; embeddings are stored beside it |
-| `GITHUB_TOKEN` | unset | GitHub API token (increases rate limit from 60 to 5000/hr) |
-| `GITHUB_LIMIT` | `50` | Max GitHub API requests |
-| `CRATES_LIMIT` | `100` | Max crates.io lookups |
-| `NPM_LIMIT` | `50` | Max npm registry lookups |
-| `LLMS_LIMIT` | `100` | Max llms.txt probes |
+| `CLIDEX_INDEX_PATH` | `~/.clidex/index.yaml` | Index location for every command; the ETag and embeddings live beside it |
+| `CLIDEX_NO_STALE_WARNING` | unset | Silence the old-index warning |
+| `GITHUB_TOKEN` | unset | GitHub API token (60 to 5,000 requests per hour) |
+| `GITHUB_LIMIT`, `CRATES_LIMIT`, `NPM_LIMIT`, `LLMS_LIMIT` | 50, 100, 50, 100 | Per-run request caps |
+| `REPOLOGY_LIMIT` | 20 | Repology requests per run, paced at about one per second |
+| `TLDR_PAGES_DIR` | unset | Unpacked [`tldr-pages.en.zip`](https://github.com/tldr-pages/tldr/releases/latest/download/tldr-pages.en.zip); examples are skipped without it |
 
----
+Add `--features semantic` to the builder to also produce embeddings.
 
 ## Contributing
 
-Contributions are welcome! Some areas that could use help:
-
-- **Adding tools to the index**: Suggest popular CLI tools that are missing
-- **Search quality**: Report queries that return unexpected results
-- **New data sources**: Integrations with other package managers
-- **Platform support**: Testing on different OS/architecture combinations
+Missing tools, poorly ranked results, and new data sources are all welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, use the search quality issue form for ranking problems, and report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ```bash
-# Development
-cargo build
-cargo test
-cargo clippy
+cargo test --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt
 ```
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Use the
-search quality issue form for missing or poorly ranked results. Report suspected
-vulnerabilities according to [SECURITY.md](SECURITY.md).
-
----
+The minimum supported Rust version is 1.88.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Usage examples come from tldr-pages under [CC BY 4.0](https://github.com/tldr-pages/tldr/blob/main/LICENSE.md).

@@ -5,12 +5,12 @@ edition = "2021"
 rust-version = "1.88"
 resolver = "3"
 autobins = false
-description = "CLI tool discovery for AI agents: search, compare, and install thousands of CLI tools with structured YAML/JSON output"
+description = "CLI tool discovery for AI agents: search thousands of CLI tools for install commands, usage examples, and docs links as JSON/YAML, from the shell or an MCP server"
 license = "MIT"
 repository = "https://github.com/syshin0116/clidex"
 homepage = "https://github.com/syshin0116/clidex"
 readme = "README.md"
-keywords = ["cli", "search", "ai-agent", "developer-tools", "bm25"]
+keywords = ["cli", "search", "ai-agent", "developer-tools", "mcp"]
 categories = ["command-line-utilities", "development-tools"]
 default-run = "clidex"
 

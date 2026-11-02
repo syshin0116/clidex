@@ -1,8 +1,8 @@
 # Clidex
 
-> CLI tool discovery for AI agents. Search, compare, and install thousands of command-line tools with structured YAML/JSON output.
+> CLI tool discovery for AI agents. Search, compare, and install thousands of command-line tools with structured YAML/JSON output, from the shell or over MCP.
 
-Clidex indexes CLI tools from Homebrew, awesome-cli-apps, toolleeo, npm, and crates.io. It returns structured YAML/JSON with install commands, GitHub stars, and documentation links. Designed for AI agents that need to discover and install CLI tools programmatically.
+Clidex is a local, offline index of command-line tools with install commands for several package managers, tldr usage examples, GitHub stars, and documentation links. It is rebuilt daily and downloaded with `clidex update`.
 
 ## Installation
 
@@ -14,94 +14,73 @@ curl -fsSL https://raw.githubusercontent.com/syshin0116/clidex/main/install.sh |
 clidex update    # Download the tool index
 ```
 
+## MCP server
+
+```bash
+clidex mcp       # stdio; e.g. `claude mcp add clidex -- clidex mcp`
+```
+
+Tools: `search_tools(query, max_results?, category?)`, `tool_info(name)`, `compare_tools(names)`, `trending_tools(category?, updated_since?, max_results?)`, `list_categories(filter?)`. Results are `structuredContent` with an output schema. Lists default to 5 results, at most 50.
+
 ## Commands
 
-### Search
-
 ```bash
-clidex "json processor"           # YAML output (default, agent-friendly)
-clidex "json processor" --pretty  # Human-friendly table
-clidex "json processor" --json    # JSON output
-clidex "file manager" -n 3        # Top 3 results
+clidex "json processor" --json               # Search
+clidex "json processor" --json --fields name,install,examples -n 3
+clidex batch "json processor" "git diff" --json   # One index load for many queries
+clidex info jq --json                        # One tool
+clidex compare jq dasel yq --json            # Side by side
+clidex trending --category git --updated-since 2026-01-01
+clidex categories git
+clidex --category docker -n 5
+clidex stats --json                          # Includes schema_version
+clidex update                                # Conditional, checksum-verified download
 ```
 
-### Tool info
+Output is YAML in a pipe and pretty on a terminal unless `--json`, `--yaml`, or `--pretty` is given. `--fields` keeps only the listed tool fields, in order. `--score` adds a relevance score.
 
-```bash
-clidex info jq                    # Full metadata
-clidex info jq --pretty
-```
+## Exit codes
 
-### Compare
+- 0: success, including an empty result `[]`
+- 2: invalid arguments
+- 3: index missing or unreadable (run `clidex update`)
+- 4: `info` or `compare` found no such tool
+- 5: `clidex update` failed
 
-```bash
-clidex compare jq dasel yq        # Side-by-side comparison
-```
+With `--json`/`--yaml`, the last stderr line(s) are `{"error": {"code", "message", "exit_code"}}`.
 
-### Browse
-
-```bash
-clidex trending -n 10             # Most popular by stars
-clidex trending --category git
-clidex --categories               # List all categories
-clidex --category docker          # Filter by category
-```
-
-### Update
-
-```bash
-clidex update                     # Download latest index
-clidex stats                      # Index statistics
-```
-
-## Output Formats
-
-- *(default)*: YAML, structured and agent-friendly
-- `--pretty`: Human-friendly table
-- `--json`: Machine-parseable JSON
-
-## Output Schema
+## Output schema
 
 ```yaml
-name: string            # Tool name
-binary: string?         # Binary name (if different)
-desc: string            # One-line description
-category: string        # e.g. "Files and Directories > Search"
-tags: [string]          # Search tags
-install:                # Install commands by package manager
-  brew: string?
-  cargo: string?
-  npm: string?
-  pipx: string?
-stars: number?          # GitHub stars
-brew_installs_365d: number?  # Homebrew annual installs (365-day)
+name: string
+binary: string?              # Binary name, if different
+desc: string
+category: string             # e.g. "Files and Directories > Search"
+tags: [string]
+install:                     # Any of: brew, cargo, npm, pipx, pacman, apk, scoop
+  brew: "brew install jq"
+examples:                    # Up to 3, from tldr-pages; {{...}} is a placeholder
+  - description: string
+    command: string
+stars: number?
+brew_installs_365d: number?
+last_updated: string?        # Last GitHub push
 links:
-  repo: string?         # GitHub repository
-  homepage: string?     # Project homepage
-  docs: string?         # Documentation URL
-  llms_txt: string?     # llms.txt URL for LLM-readable docs
+  repo: string?
+  homepage: string?
+  docs: string?
+  llms_txt: string?          # llms.txt URL for LLM-readable docs
 ```
 
-## Data Sources
+Within a `schema_version`, fields are only added. Ignore unknown keys.
 
-Updated daily via GitHub Actions:
+## Data sources
 
-- awesome-cli-apps (curated, ~473 tools)
-- toolleeo/cli-apps (structured CSV, ~2,200 tools)
-- Homebrew formulae (~8,200 packages)
-- Homebrew Cask (terminal emulators, GUI+CLI apps)
-- npm registry (CLI packages with bin field)
-- crates.io (Rust CLI tools + category-based discovery)
-- PyPI (Python CLI tools via pipx)
-- GitHub API (stars, last updated)
-- Homebrew install-on-request analytics (popularity)
-
-## Search Algorithm
-
-BM25 with field weighting + synonym expansion (30+ groups) + intent coverage scoring + popularity boost (GitHub stars, Homebrew installs) + fuzzy matching (nucleo subsequence + edit distance for typo correction) + confidence gates. Optional Model2Vec semantic search via Reciprocal Rank Fusion.
+awesome-cli-apps, toolleeo/cli-apps, modern-unix, awesome-tuis, Homebrew (formulae, casks, analytics), crates.io, npm, PyPI, Repology (pacman, apk, scoop), tldr-pages (examples, CC BY 4.0), GitHub API, and llms.txt probing. Install commands and examples are only attached when the source can be tied to the same project.
 
 ## Links
 
 - Repo: <https://github.com/syshin0116/clidex>
 - Crates.io: <https://crates.io/crates/clidex>
+- Agent integration and output contract: <https://github.com/syshin0116/clidex/blob/main/docs/agent-integration.md>
 - Index: <https://github.com/syshin0116/clidex/releases/download/index/index.yaml>

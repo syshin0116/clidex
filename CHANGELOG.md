@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `clidex update` downloads the zstd-compressed index (about 330 KB instead of 2 MB) and falls back to plain YAML.
 - Tools carry up to three usage `examples` from tldr-pages when the page links to the tool's own repository or homepage.
 - `pacman`, `apk`, and `scoop` install commands from Repology for Homebrew formulae whose Repology project contains the same formula.
+- An agent skill in `skills/clidex` for clients that load SKILL.md files.
 - `clidex mcp` serves `search_tools`, `tool_info`, `compare_tools`, `trending_tools`, and `list_categories` to MCP clients over stdio, with output schemas and structured results. It downloads a missing index on startup.
 
 ### Changed
