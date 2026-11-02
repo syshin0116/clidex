@@ -89,14 +89,17 @@ jobs:
             echo "No count changes to commit"
           fi
 
-      - name: Write index checksum
-        run: sha256sum index.yaml > index.yaml.sha256
+      - name: Write index checksum and compressed copy
+        run: |
+          sha256sum index.yaml > index.yaml.sha256
+          zstd -19 -q -f index.yaml -o index.yaml.zst
 
       - name: Attest index provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             index.yaml
+            index.yaml.zst
             index.embeddings.bin
 
       - name: Upload index as release asset
@@ -106,7 +109,7 @@ jobs:
               --notes "Auto-generated CLI tool index. Updated daily." --latest=false
           fi
           gh release upload index index.embeddings.bin --clobber
-          gh release upload index index.yaml --clobber
+          gh release upload index index.yaml index.yaml.zst --clobber
           gh release upload index index.yaml.sha256 --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -73,6 +73,17 @@ fn etag_path(index_path: &Path) -> std::path::PathBuf {
     index_path.with_extension("etag")
 }
 
+fn decompress_zstd(bytes: &[u8]) -> Result<String, String> {
+    use std::io::Read;
+    let mut decoder = ruzstd::decoding::StreamingDecoder::new(bytes)
+        .map_err(|error| format!("Invalid compressed index: {error}"))?;
+    let mut text = String::new();
+    decoder
+        .read_to_string(&mut text)
+        .map_err(|error| format!("Invalid compressed index: {error}"))?;
+    Ok(text)
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::Digest;
     sha2::Sha256::digest(bytes)
@@ -117,20 +128,32 @@ pub async fn update_index() -> Result<UpdateOutcome, String> {
         .as_ref()
         .and_then(|_| fs::read_to_string(etag_path(&path)).ok());
 
-    eprintln!("Downloading index from {}...", config::INDEX_URL);
+    eprintln!("Downloading index from {}...", config::INDEX_ZST_URL);
     // The index and its checksum are separate release assets uploaded one after
     // the other, so a download can land between the two uploads. Retry once.
     let mut attempt = 0;
     let (index, body, new_etag) = loop {
         attempt += 1;
-        let mut request = client.get(config::INDEX_URL);
-        if let Some(etag) = etag.as_deref() {
-            request = request.header(reqwest::header::IF_NONE_MATCH, etag.trim());
-        }
-        let response = request
-            .send()
+        let send = |url: &str| {
+            let mut request = client.get(url);
+            if let Some(etag) = etag.as_deref() {
+                request = request.header(reqwest::header::IF_NONE_MATCH, etag.trim());
+            }
+            request.send()
+        };
+        let mut compressed = true;
+        let mut response = send(config::INDEX_ZST_URL)
             .await
-            .and_then(reqwest::Response::error_for_status)
+            .map_err(|error| format!("Download failed: {error}"))?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            // Releases published before the compressed asset existed.
+            compressed = false;
+            response = send(config::INDEX_URL)
+                .await
+                .map_err(|error| format!("Download failed: {error}"))?;
+        }
+        let response = response
+            .error_for_status()
             .map_err(|error| format!("Download failed: {error}"))?;
         if response.status() == reqwest::StatusCode::NOT_MODIFIED {
             if let Some(local) = local {
@@ -146,7 +169,12 @@ pub async fn update_index() -> Result<UpdateOutcome, String> {
             .get(reqwest::header::ETAG)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let body = response.text().await.map_err(|error| error.to_string())?;
+        let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+        let body = if compressed {
+            decompress_zstd(&bytes)?
+        } else {
+            String::from_utf8(bytes.to_vec()).map_err(|error| error.to_string())?
+        };
         match verify_checksum(&client, body.as_bytes()).await {
             Ok(()) => break (parse_index(&body)?, body, new_etag),
             Err(_) if attempt < 2 => tokio::time::sleep(std::time::Duration::from_secs(3)).await,
@@ -231,6 +259,7 @@ pub fn index_stats(index: &Index) -> IndexStats {
     }
 
     IndexStats {
+        schema_version: crate::output::SCHEMA_VERSION,
         version: index.version,
         generated: index.generated.clone(),
         total,
@@ -244,6 +273,8 @@ pub fn index_stats(index: &Index) -> IndexStats {
 
 #[derive(serde::Serialize)]
 pub struct IndexStats {
+    /// Version of the JSON/YAML output contract; fields are only ever added within a version.
+    pub schema_version: u32,
     pub version: u32,
     pub generated: String,
     pub total: usize,
@@ -286,6 +317,18 @@ mod tests {
         assert_eq!(age_in_days("1970-01-01T00:00:00Z", 0), Some(0));
         assert_eq!(age_in_days("test", 0), None);
         assert_eq!(age_in_days("2026-13-01T00:00:00Z", 0), None);
+    }
+
+    #[test]
+    fn decompress_zstd_round_trips_and_rejects_garbage() {
+        let text = "version: 1\ngenerated: '2026-09-07T00:00:00Z'\ntools: []\n".repeat(50);
+        let compressed = ruzstd::encoding::compress_to_vec(
+            text.as_bytes(),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        );
+        assert!(compressed.len() < text.len());
+        assert_eq!(decompress_zstd(&compressed).unwrap(), text);
+        assert!(decompress_zstd(b"not zstd").is_err());
     }
 
     #[test]

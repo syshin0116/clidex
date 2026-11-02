@@ -39,6 +39,8 @@ futures = "0.3.34"
 terminal_size = "0.4.4"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 sha2 = "0.11.0"
+# 0.8.2 uses Rust 1.87 APIs without declaring rust-version, so the MSRV-aware resolver cannot skip it.
+ruzstd = "=0.8.1"
 
 [dev-dependencies]
 
