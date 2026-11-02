@@ -2,7 +2,7 @@
 name = "clidex"
 version = "0.4.0"
 edition = "2021"
-rust-version = "1.86"
+rust-version = "1.88"
 resolver = "3"
 autobins = false
 description = "CLI tool discovery for AI agents: search, compare, and install thousands of CLI tools with structured YAML/JSON output"
@@ -39,8 +39,7 @@ futures = "0.3.34"
 terminal_size = "0.4.4"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 sha2 = "0.11.0"
-# 0.8.2 uses Rust 1.87 APIs without declaring rust-version, so the MSRV-aware resolver cannot skip it.
-ruzstd = "=0.8.1"
+ruzstd = "0.9.1"
 
 [dev-dependencies]
 
