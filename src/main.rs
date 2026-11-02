@@ -9,6 +9,7 @@ use std::io::IsTerminal;
 #[command(name = "clidex", version, about = "CLI tool discovery for AI agents")]
 struct Cli {
     /// Search query (e.g. "csv to json")
+    #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
     query: Option<String>,
     /// Force pretty-printed output
     #[arg(long, global = true, conflicts_with_all = ["json", "yaml"])]
@@ -26,7 +27,7 @@ struct Cli {
     #[arg(long, conflicts_with = "query")]
     categories: bool,
     /// Maximum number of results (default: 10, trending: 20)
-    #[arg(short = 'n', long, global = true)]
+    #[arg(short = 'n', long, global = true, value_parser = parse_max_results)]
     max_results: Option<usize>,
     /// Include relevance scores
     #[arg(long, global = true)]
@@ -38,10 +39,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Search for CLI tools
-    Search { query: String },
+    Search {
+        #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
+        query: String,
+    },
     /// Search multiple queries while loading the index once
     Batch {
-        #[arg(required = true)]
+        #[arg(required = true, value_parser = clap::builder::NonEmptyStringValueParser::new())]
         queries: Vec<String>,
     },
     /// Show detailed info about a tool
@@ -60,9 +64,39 @@ enum Commands {
     /// Show popular tools sorted by GitHub stars
     Trending {
         /// Only include tools updated on or after YYYY-MM-DD
-        #[arg(long)]
+        #[arg(long, value_parser = parse_date)]
         updated_since: Option<String>,
     },
+}
+
+fn parse_max_results(value: &str) -> Result<usize, String> {
+    match value.parse::<usize>() {
+        Ok(0) | Err(_) => Err("expected a positive integer".into()),
+        Ok(count) => Ok(count),
+    }
+}
+
+/// Accept only `YYYY-MM-DD`, which compares correctly with index dates as a string.
+fn parse_date(value: &str) -> Result<String, String> {
+    let bytes = value.as_bytes();
+    let well_formed = bytes.len() == 10
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(position, byte)| match position {
+                4 | 7 => *byte == b'-',
+                _ => byte.is_ascii_digit(),
+            });
+    let month = value.get(5..7).and_then(|month| month.parse::<u8>().ok());
+    let day = value.get(8..10).and_then(|day| day.parse::<u8>().ok());
+    if well_formed
+        && month.is_some_and(|month| (1..=12).contains(&month))
+        && day.is_some_and(|day| (1..=31).contains(&day))
+    {
+        Ok(value.to_owned())
+    } else {
+        Err("expected a date in YYYY-MM-DD format".into())
+    }
 }
 
 /// Detect output format: explicit flags > TTY detection > YAML default.
@@ -85,14 +119,18 @@ fn get_format(pretty: bool, json: bool, yaml: bool) -> Format {
 async fn load_or_download() -> Result<clidex::model::Index, String> {
     let path = config::index_path()?;
     match index::load_index() {
-        Ok(i) => Ok(i),
+        Ok(index) => {
+            index::warn_if_stale(&index);
+            Ok(index)
+        }
         Err(_) if !path.exists() => {
             if std::io::stdin().is_terminal() {
                 // Auto-download in an interactive terminal.
                 eprintln!("Index not found. Downloading from {}...", config::INDEX_URL);
-                let count = index::update_index().await?;
-                eprintln!("Index downloaded: {count} tools");
-                index::load_index()
+                index::update_index().await?;
+                let index = index::load_index()?;
+                eprintln!("Index downloaded: {} tools", index.tools.len());
+                Ok(index)
             } else {
                 // Do not make silent network calls in CI or a pipe.
                 Err(format!(
@@ -185,10 +223,12 @@ async fn run() -> Result<(), String> {
         .command
         .or_else(|| cli.query.map(|query| Commands::Search { query }));
     match command {
-        Some(Commands::Update) => {
-            let count = index::update_index().await?;
-            eprintln!("Index updated: {count} tools");
-        }
+        Some(Commands::Update) => match index::update_index().await? {
+            index::UpdateOutcome::Updated(count) => eprintln!("Index updated: {count} tools"),
+            index::UpdateOutcome::AlreadyCurrent(count) => {
+                eprintln!("Index already up to date: {count} tools")
+            }
+        },
         Some(Commands::Search { .. } | Commands::Batch { .. }) => {
             let (queries, batch) = match command.unwrap() {
                 Commands::Search { query } => (vec![query], false),
@@ -265,7 +305,7 @@ async fn run() -> Result<(), String> {
             }
         }
         Some(Commands::Info { name }) => {
-            let idx = index::load_index()?;
+            let idx = load_or_download().await?;
             let tool = search::find_tool(&idx.tools, &name).ok_or_else(|| {
                 let results = search::search(&idx.tools, &name, 3);
                 if !results.is_empty() {
@@ -283,7 +323,7 @@ async fn run() -> Result<(), String> {
             output::print_tool_detail(&tool, format);
         }
         Some(Commands::Compare { names }) => {
-            let idx = index::load_index()?;
+            let idx = load_or_download().await?;
             let mut tools = Vec::new();
             let mut missing = Vec::new();
             for name in names {
@@ -314,7 +354,7 @@ async fn run() -> Result<(), String> {
             output::print_compare(&tools, format);
         }
         Some(Commands::Trending { updated_since }) => {
-            let idx = index::load_index()?;
+            let idx = load_or_download().await?;
             let mut tools = cli
                 .category
                 .as_ref()
@@ -334,7 +374,7 @@ async fn run() -> Result<(), String> {
             output::print_tools(&tools, format);
         }
         Some(Commands::Stats) => {
-            let stats = index::index_stats(&index::load_index()?);
+            let stats = index::index_stats(&load_or_download().await?);
             output::print_stats(&stats, format);
         }
         Some(Commands::Categories { .. }) | None
@@ -344,7 +384,7 @@ async fn run() -> Result<(), String> {
                 Some(Commands::Categories { filter }) => filter,
                 _ => None,
             };
-            let mut categories = search::get_categories(&index::load_index()?.tools);
+            let mut categories = search::get_categories(&load_or_download().await?.tools);
             if let Some(filter) = filter {
                 let filter = filter.to_lowercase();
                 categories.retain(|(name, _)| {
@@ -356,7 +396,7 @@ async fn run() -> Result<(), String> {
             output::print_categories(&categories, format);
         }
         None if cli.category.is_some() => {
-            let idx = index::load_index()?;
+            let idx = load_or_download().await?;
             let category = cli.category.as_ref().unwrap();
             let mut tools = search::filter_by_category(&idx.tools, category);
             tools.truncate(max_results);
