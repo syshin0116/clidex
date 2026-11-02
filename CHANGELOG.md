@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stats` reports the output `schema_version`.
 - `clidex update` downloads the zstd-compressed index (about 330 KB instead of 2 MB) and falls back to plain YAML.
 
+### Changed
+
+- Minimum supported Rust version is now 1.88 (from 1.86), required by `ruzstd` 0.9.1 (RUSTSEC-2026-0344) and the MCP SDK.
+
 ## [0.4.0] - 2026-04-07
 
 ### Added

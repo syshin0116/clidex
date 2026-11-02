@@ -73,14 +73,21 @@ fn etag_path(index_path: &Path) -> std::path::PathBuf {
     index_path.with_extension("etag")
 }
 
+/// Upper bound on the decompressed index; the current index is about 2 MB.
+const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
+
 fn decompress_zstd(bytes: &[u8]) -> Result<String, String> {
     use std::io::Read;
-    let mut decoder = ruzstd::decoding::StreamingDecoder::new(bytes)
+    let decoder = ruzstd::decoding::StreamingDecoder::new(bytes)
         .map_err(|error| format!("Invalid compressed index: {error}"))?;
     let mut text = String::new();
     decoder
+        .take(MAX_INDEX_BYTES + 1)
         .read_to_string(&mut text)
         .map_err(|error| format!("Invalid compressed index: {error}"))?;
+    if text.len() as u64 > MAX_INDEX_BYTES {
+        return Err("Compressed index expands beyond the size limit".into());
+    }
     Ok(text)
 }
 
@@ -321,6 +328,7 @@ mod tests {
 
     #[test]
     fn decompress_zstd_round_trips_and_rejects_garbage() {
+        use std::io::Read;
         let text = "version: 1\ngenerated: '2026-09-07T00:00:00Z'\ntools: []\n".repeat(50);
         let compressed = ruzstd::encoding::compress_to_vec(
             text.as_bytes(),
@@ -329,6 +337,11 @@ mod tests {
         assert!(compressed.len() < text.len());
         assert_eq!(decompress_zstd(&compressed).unwrap(), text);
         assert!(decompress_zstd(b"not zstd").is_err());
+        let bomb = ruzstd::encoding::compress_to_vec(
+            std::io::repeat(b'a').take(MAX_INDEX_BYTES + 1),
+            ruzstd::encoding::CompressionLevel::Fastest,
+        );
+        assert!(decompress_zstd(&bomb).is_err());
     }
 
     #[test]

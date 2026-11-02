@@ -24,7 +24,7 @@ jobs:
       - name: Install minimum supported Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: 1.86.0
+          toolchain: 1.88.0
       - name: Check minimum supported Rust
         run: cargo check --locked --all-targets --features index-builder
 
