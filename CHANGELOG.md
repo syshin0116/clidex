@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `links.docs` was set for only 2 tools. The index builder now fills it from crates.io `documentation`, PyPI `project_urls`, and the "More information" link of a matching tldr page, skipping docs.rs, README files, and copies of the repository or homepage link.
+
 ## [0.5.0] - 2026-11-03
 
 ### Security

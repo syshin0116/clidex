@@ -86,7 +86,7 @@ Exit codes, the error object on stderr, and the schema versioning policy are in 
 | `examples` | up to three tldr examples, `{{...}}` marks a placeholder | [tldr-pages](https://github.com/tldr-pages/tldr) |
 | `stars`, `last_updated` | GitHub stars and last push | GitHub API |
 | `brew_installs_365d` | Homebrew installs in the last year | Homebrew analytics |
-| `links` | `repo`, `homepage`, `docs`, `llms_txt` | GitHub, project sites |
+| `links` | `repo`, `homepage`, `docs`, `llms_txt` | GitHub, crates.io, PyPI, tldr-pages, project sites |
 
 `llms_txt` points to an [llms.txt](https://llmstxt.org/) file an agent can fetch to learn the tool. The full field list is in [`src/model.rs`](src/model.rs).
 

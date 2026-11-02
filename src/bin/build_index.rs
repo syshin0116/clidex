@@ -512,6 +512,42 @@ fn same_repository(a: Option<&str>, b: Option<&str>) -> bool {
         .is_some_and(|(a, b)| a == b)
 }
 
+/// A documentation link worth storing: http(s), not docs.rs (the library API
+/// docs of what is a binary crate here), and not a repository root, README, or
+/// a copy of the homepage or repository link the entry already has.
+fn docs_link(url: &str, links: &Links) -> Option<String> {
+    let url = url.trim();
+    let parsed = reqwest::Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = parsed.host_str()?.trim_start_matches("www.").to_lowercase();
+    if host == "docs.rs" {
+        return None;
+    }
+    if host == "github.com" && parsed.fragment().is_none() {
+        let segments: Vec<_> = parsed.path_segments()?.filter(|s| !s.is_empty()).collect();
+        let readme = segments
+            .last()
+            .is_some_and(|s| s.to_lowercase().starts_with("readme"));
+        if segments.len() <= 2 || readme {
+            return None;
+        }
+    }
+    let normalized = |link: &str| link.trim().trim_end_matches('/').to_lowercase();
+    let duplicate = [links.homepage.as_deref(), links.repo.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(|link| normalized(link) == normalized(url));
+    (!duplicate).then(|| url.to_owned())
+}
+
+fn set_docs(tool: &mut Tool, url: Option<&str>) {
+    if tool.links.docs.is_none() {
+        tool.links.docs = url.and_then(|url| docs_link(url, &tool.links));
+    }
+}
+
 fn load_stars_cache(path: &str) -> HashMap<(String, String), Tool> {
     let index: Index = match std::fs::read_to_string(path)
         .ok()
@@ -746,6 +782,7 @@ async fn enrich_with_crates_io(tools: &mut [Tool], client: &reqwest::Client, max
                                 format!("cargo install {}", crate_name),
                             );
                             tool.binary.get_or_insert(binary);
+                            set_docs(tool, json["crate"]["documentation"].as_str());
                             found += 1;
                         }
                     }
@@ -932,7 +969,8 @@ fn tldr_page_matches(tool: &Tool, more_information: Option<&str>) -> bool {
             .any(|link| url_host(link) == host)
 }
 
-/// Attach up to [`MAX_EXAMPLES`] tldr examples to each tool whose page matches it.
+/// Attach up to [`MAX_EXAMPLES`] tldr examples to each tool whose page matches
+/// it, and use the page's "More information" link as its docs link.
 fn enrich_with_tldr(tools: &mut [Tool], pages_dir: &std::path::Path) -> usize {
     let mut matched = 0;
     for tool in tools.iter_mut() {
@@ -950,7 +988,11 @@ fn enrich_with_tldr(tools: &mut [Tool], pages_dir: &std::path::Path) -> usize {
                 tldr_page_matches(tool, page.more_information.as_deref()).then_some(page)
             })
         });
-        if let Some(page) = page.filter(|page| !page.examples.is_empty()) {
+        let Some(page) = page else {
+            continue;
+        };
+        set_docs(tool, page.more_information.as_deref());
+        if !page.examples.is_empty() {
             tool.examples = page.examples.into_iter().take(MAX_EXAMPLES).collect();
             matched += 1;
         }
@@ -2232,6 +2274,10 @@ async fn discover_from_crates_io(existing: &mut Vec<Tool>, client: &reqwest::Cli
                     examples: Vec::new(),
                     repology_fetched_at: None,
                 });
+                set_docs(
+                    existing.last_mut().expect("just pushed"),
+                    krate["documentation"].as_str(),
+                );
                 added += 1;
             }
         }
@@ -2358,6 +2404,12 @@ async fn discover_from_pypi(existing: &mut Vec<Tool>, client: &reqwest::Client) 
             examples: Vec::new(),
             repology_fetched_at: None,
         });
+        let documentation = info["project_urls"].as_object().and_then(|urls| {
+            urls.iter()
+                .find(|(key, _)| matches!(key.to_lowercase().as_str(), "documentation" | "docs"))
+                .and_then(|(_, url)| url.as_str())
+        });
+        set_docs(existing.last_mut().expect("just pushed"), documentation);
         added += 1;
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -2819,6 +2871,33 @@ mod tests {
         assert_eq!(tool.github_fetched_at, None);
     }
 
+    #[test]
+    fn docs_link_keeps_usage_pages_and_drops_duplicates() {
+        let links = Links {
+            repo: Some("https://github.com/owner/tool".into()),
+            homepage: Some("https://tool.dev/".into()),
+            docs: None,
+            llms_txt: None,
+        };
+        for kept in [
+            "https://tool.dev/docs/cli",
+            "https://github.com/owner/tool#usage",
+            "https://github.com/owner/tool/blob/main/GUIDE.md",
+        ] {
+            assert_eq!(docs_link(kept, &links).as_deref(), Some(kept));
+        }
+        for dropped in [
+            "https://tool.dev",
+            "https://github.com/Owner/Tool/",
+            "https://github.com/owner/tool/blob/main/README.md",
+            "https://docs.rs/tool",
+            "ftp://tool.dev/docs",
+            "not a url",
+        ] {
+            assert_eq!(docs_link(dropped, &links), None, "{dropped}");
+        }
+    }
+
     fn tool_with_links(name: &str, repo: Option<&str>, homepage: Option<&str>) -> Tool {
         let mut tool: Tool =
             serde_norway::from_str(&format!("name: {name}\ndesc: test\ncategory: Test\n")).unwrap();
@@ -2862,6 +2941,28 @@ mod tests {
             Some("https://taskwarrior.org/docs")
         ));
         assert!(!tldr_page_matches(&site, None));
+    }
+
+    #[test]
+    fn tldr_link_becomes_docs_only_for_the_matching_tool() {
+        let pages = std::env::temp_dir().join(format!("clidex-tldr-{}", std::process::id()));
+        std::fs::create_dir_all(pages.join("common")).unwrap();
+        std::fs::write(
+            pages.join("common/task.md"),
+            "# task\n\n> More information: <https://taskfile.dev/usage>.\n",
+        )
+        .unwrap();
+        let mut tools = vec![
+            tool_with_links("task", None, Some("https://taskfile.dev/")),
+            tool_with_links("task", None, Some("https://taskwarrior.org/")),
+        ];
+        assert_eq!(enrich_with_tldr(&mut tools, &pages), 0);
+        assert_eq!(
+            tools[0].links.docs.as_deref(),
+            Some("https://taskfile.dev/usage")
+        );
+        assert_eq!(tools[1].links.docs, None);
+        std::fs::remove_dir_all(pages).unwrap();
     }
 
     #[test]
