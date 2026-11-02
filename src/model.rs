@@ -27,6 +27,17 @@ pub struct Tool {
     pub last_updated: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_fetched_at: Option<u64>,
+    /// Usage examples from tldr-pages; `{{...}}` marks a placeholder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<Example>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repology_fetched_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Example {
+    pub description: String,
+    pub command: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]

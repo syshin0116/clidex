@@ -50,6 +50,8 @@ pub const TOOL_FIELDS: &[&str] = &[
     "links",
     "last_updated",
     "github_fetched_at",
+    "examples",
+    "repology_fetched_at",
 ];
 
 /// A JSON object that serializes its keys in insertion order.

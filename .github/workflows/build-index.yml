@@ -45,6 +45,12 @@ jobs:
             https://github.com/${{ github.repository }}/releases/download/index/index.yaml \
             2>/dev/null || echo "No previous index found, building from scratch"
 
+      - name: Download tldr pages
+        run: |
+          curl -fsSL -o tldr.zip https://github.com/tldr-pages/tldr/releases/latest/download/tldr-pages.en.zip
+          unzip -q tldr.zip -d tldr-pages
+          echo "TLDR_PAGES_DIR=${{ github.workspace }}/tldr-pages" >> "$GITHUB_ENV"
+
       - name: Build index
         run: |
           if [ -f prev_index.yaml ]; then
@@ -59,6 +65,8 @@ jobs:
           NPM_LIMIT: 500
           LLMS_LIMIT: 500
           TOOLLEEO_LIMIT: 500
+          # Repology allows about one request per second; results are cached for 30 days.
+          REPOLOGY_LIMIT: 600
 
       - name: Verify generated index quality
         env:

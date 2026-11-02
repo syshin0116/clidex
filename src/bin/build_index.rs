@@ -1,4 +1,4 @@
-use clidex::model::{Index, Links, Tool};
+use clidex::model::{Example, Index, Links, Tool};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
@@ -157,6 +157,8 @@ fn parse_awesome_cli_apps(markdown: &str) -> Vec<Tool> {
                 },
                 last_updated: None,
                 github_fetched_at: None,
+                examples: Vec::new(),
+                repology_fetched_at: None,
             });
         }
     }
@@ -273,6 +275,8 @@ fn parse_toolleeo_csv(apps_csv: &str, categories_csv: &str) -> Vec<Tool> {
             },
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         });
     }
 
@@ -481,6 +485,8 @@ fn add_homebrew_cli_tools(existing: &mut Vec<Tool>, brew_data: &[BrewFormula]) {
                 },
                 last_updated: None,
                 github_fetched_at: None,
+                examples: Vec::new(),
+                repology_fetched_at: None,
             });
         }
     }
@@ -867,6 +873,218 @@ async fn enrich_with_npm(tools: &mut [Tool], client: &reqwest::Client, max_reque
     );
 }
 
+const MAX_EXAMPLES: usize = 3;
+/// Platform directories of an unpacked tldr-pages archive, most general first.
+const TLDR_PLATFORMS: &[&str] = &["common", "linux", "osx", "windows"];
+
+/// A parsed tldr page: its "More information" link and its examples.
+struct TldrPage {
+    more_information: Option<String>,
+    examples: Vec<Example>,
+}
+
+/// Parse tldr markdown: `- description:` lines, each followed by a backticked command.
+fn parse_tldr_page(markdown: &str) -> TldrPage {
+    let mut page = TldrPage {
+        more_information: None,
+        examples: Vec::new(),
+    };
+    let mut description: Option<String> = None;
+    for line in markdown.lines().map(str::trim) {
+        if let Some(rest) = line.strip_prefix("> More information: <") {
+            page.more_information = rest.split('>').next().map(str::to_owned);
+        } else if let Some(text) = line.strip_prefix("- ") {
+            description = Some(text.trim_end_matches(':').to_owned());
+        } else if let Some(command) = line.strip_prefix('`').and_then(|l| l.strip_suffix('`')) {
+            if let Some(description) = description.take() {
+                page.examples.push(Example {
+                    description,
+                    command: command.to_owned(),
+                });
+            }
+        }
+    }
+    page
+}
+
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let host = rest.split(['/', '?', '#']).next()?.to_lowercase();
+    Some(host.trim_start_matches("www.").to_owned())
+}
+
+/// A tldr page belongs to a tool only when its "More information" link points
+/// at the tool's GitHub repository or its homepage host. Page names alone
+/// collide (Taskwarrior and go-task are both `task`).
+fn tldr_page_matches(tool: &Tool, more_information: Option<&str>) -> bool {
+    let Some(url) = more_information else {
+        return false;
+    };
+    if same_repository(Some(url), tool.links.repo.as_deref()) {
+        return true;
+    }
+    let host = url_host(url);
+    host.is_some()
+        && host != Some("github.com".into())
+        && [tool.links.homepage.as_deref(), tool.links.repo.as_deref()]
+            .into_iter()
+            .flatten()
+            .any(|link| url_host(link) == host)
+}
+
+/// Attach up to [`MAX_EXAMPLES`] tldr examples to each tool whose page matches it.
+fn enrich_with_tldr(tools: &mut [Tool], pages_dir: &std::path::Path) -> usize {
+    let mut matched = 0;
+    for tool in tools.iter_mut() {
+        let names: Vec<String> = [tool.binary.as_deref(), Some(tool.name.as_str())]
+            .into_iter()
+            .flatten()
+            .map(str::to_lowercase)
+            .collect();
+        let page = names.iter().find_map(|name| {
+            TLDR_PLATFORMS.iter().find_map(|platform| {
+                let markdown =
+                    std::fs::read_to_string(pages_dir.join(platform).join(format!("{name}.md")))
+                        .ok()?;
+                let page = parse_tldr_page(&markdown);
+                tldr_page_matches(tool, page.more_information.as_deref()).then_some(page)
+            })
+        });
+        if let Some(page) = page.filter(|page| !page.examples.is_empty()) {
+            tool.examples = page.examples.into_iter().take(MAX_EXAMPLES).collect();
+            matched += 1;
+        }
+    }
+    matched
+}
+
+/// Install methods added from Repology, keyed like `Tool::install`.
+const REPOLOGY_INSTALLS: &[(&str, &str, &str)] = &[
+    ("arch", "pacman", "pacman -S"),
+    ("alpine_edge", "apk", "apk add"),
+    ("scoop", "scoop", "scoop install"),
+];
+
+fn homebrew_formula(tool: &Tool) -> Option<&str> {
+    let formula = tool.install.get("brew")?.strip_prefix("brew install ")?;
+    (!formula.starts_with('-') && !formula.contains(' ')).then_some(formula)
+}
+
+/// Map a Repology project to install commands. The project must contain the
+/// exact Homebrew formula the tool already uses, which ties the project to
+/// this tool instead of to another package with the same name.
+fn repology_installs(
+    formula: &str,
+    binary: Option<&str>,
+    packages: &[serde_json::Value],
+) -> Option<Vec<(String, String)>> {
+    let has_formula = packages.iter().any(|package| {
+        package["repo"] == "homebrew" && package["srcname"].as_str() == Some(formula)
+    });
+    if !has_formula {
+        return None;
+    }
+    let accepted = |name: &str| name == formula || Some(name) == binary;
+    let installs = REPOLOGY_INSTALLS
+        .iter()
+        .filter_map(|(repo, key, command)| {
+            packages
+                .iter()
+                .filter(|package| package["repo"] == *repo)
+                .filter_map(|package| package["binname"].as_str())
+                .find(|name| accepted(name))
+                .map(|name| (key.to_string(), format!("{command} {name}")))
+        })
+        .collect();
+    Some(installs)
+}
+
+/// Add pacman, apk, and scoop install commands from Repology for Homebrew
+/// formulae. Repology allows about one request per second, so results are
+/// cached in the previous index and refreshed after `cache_max_age_days`.
+async fn enrich_with_repology(
+    tools: &mut [Tool],
+    client: &reqwest::Client,
+    max_requests: usize,
+    previous: &HashMap<String, Tool>,
+    cache_max_age_days: u64,
+) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut requests = 0;
+    let mut refreshed = 0;
+    for tool in tools.iter_mut() {
+        let Some(formula) = homebrew_formula(tool).map(str::to_owned) else {
+            continue;
+        };
+        if let Some(cached) = previous.get(&tool.name) {
+            if homebrew_formula(cached) == Some(formula.as_str()) {
+                tool.repology_fetched_at = cached.repology_fetched_at;
+                for (_, key, _) in REPOLOGY_INSTALLS {
+                    if let Some(command) = cached.install.get(*key) {
+                        tool.install
+                            .entry(key.to_string())
+                            .or_insert_with(|| command.clone());
+                    }
+                }
+            }
+        }
+        if is_cache_fresh(tool.repology_fetched_at, now, cache_max_age_days)
+            || requests >= max_requests
+        {
+            continue;
+        }
+        if requests > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        }
+        requests += 1;
+        let url = format!("https://repology.org/api/v1/project/{formula}");
+        let packages = match client
+            .get(&url)
+            .header(
+                "User-Agent",
+                "clidex-index-builder (+https://github.com/syshin0116/clidex)",
+            )
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+        {
+            Ok(response) => response.json::<Vec<serde_json::Value>>().await.ok(),
+            Err(_) => None,
+        };
+        let Some(packages) = packages else {
+            continue;
+        };
+        if let Some(installs) = repology_installs(&formula, tool.binary.as_deref(), &packages) {
+            for (_, key, _) in REPOLOGY_INSTALLS {
+                tool.install.remove(*key);
+            }
+            tool.install.extend(installs);
+        }
+        tool.repology_fetched_at = Some(now);
+        refreshed += 1;
+    }
+    eprintln!(
+        "Repology: {refreshed} refreshed ({requests} requests); cached values kept otherwise"
+    );
+}
+
+fn load_previous_tools(path: &str) -> HashMap<String, Tool> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_norway::from_str::<Index>(&content).ok())
+        .map(|index| {
+            index
+                .tools
+                .into_iter()
+                .map(|tool| (tool.name.clone(), tool))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Manually curated tools that aren't discoverable via automated data sources.
 /// These are app-bundled CLIs, proprietary tools, or tools with unusual distribution.
 fn add_manual_tools(tools: &mut Vec<Tool>) {
@@ -901,6 +1119,8 @@ fn add_manual_tools(tools: &mut Vec<Tool>) {
             },
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         },
         Tool {
             name: "obsidian".to_string(),
@@ -927,6 +1147,8 @@ fn add_manual_tools(tools: &mut Vec<Tool>) {
             },
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         },
     ];
 
@@ -1704,6 +1926,8 @@ fn discover_from_homebrew(
             },
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         });
         added += 1;
     }
@@ -1787,6 +2011,8 @@ fn discover_from_homebrew_casks(existing: &mut Vec<Tool>, cask_data: &[BrewCask]
             },
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         });
         added += 1;
     }
@@ -1881,6 +2107,8 @@ async fn discover_from_npm(existing: &mut Vec<Tool>, client: &reqwest::Client) {
                     },
                     last_updated: None,
                     github_fetched_at: None,
+                    examples: Vec::new(),
+                    repology_fetched_at: None,
                 });
                 added += 1;
             }
@@ -2001,6 +2229,8 @@ async fn discover_from_crates_io(existing: &mut Vec<Tool>, client: &reqwest::Cli
                     },
                     last_updated: None,
                     github_fetched_at: None,
+                    examples: Vec::new(),
+                    repology_fetched_at: None,
                 });
                 added += 1;
             }
@@ -2125,6 +2355,8 @@ async fn discover_from_pypi(existing: &mut Vec<Tool>, client: &reqwest::Client) 
             },
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         });
         added += 1;
 
@@ -2360,6 +2592,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .count();
     eprintln!("Matched {} tools with Homebrew", brew_matched);
 
+    // Step 3b: Linux and Windows package managers from Repology
+    let repology_limit = std::env::var("REPOLOGY_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+    let previous_tools = if prev_index_path.is_empty() {
+        HashMap::new()
+    } else {
+        load_previous_tools(&prev_index_path)
+    };
+    eprintln!(
+        "Checking Repology (limit: {}, set REPOLOGY_LIMIT to change)...",
+        repology_limit
+    );
+    enrich_with_repology(&mut tools, &client, repology_limit, &previous_tools, 30).await;
+
     // Step 4: crates.io enrichment
     let crates_limit = std::env::var("CRATES_LIMIT")
         .ok()
@@ -2395,6 +2643,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 6b: Add manually curated tools not discoverable via data sources
     add_manual_tools(&mut tools);
+
+    // Step 6c: Usage examples from an unpacked tldr-pages archive
+    if let Some(pages_dir) = std::env::var_os("TLDR_PAGES_DIR") {
+        let matched = enrich_with_tldr(&mut tools, std::path::Path::new(&pages_dir));
+        eprintln!("Added tldr examples to {matched} tools");
+    }
 
     // Step 7: Build and save index
     let index = Index {
@@ -2565,6 +2819,79 @@ mod tests {
         assert_eq!(tool.github_fetched_at, None);
     }
 
+    fn tool_with_links(name: &str, repo: Option<&str>, homepage: Option<&str>) -> Tool {
+        let mut tool: Tool =
+            serde_norway::from_str(&format!("name: {name}\ndesc: test\ncategory: Test\n")).unwrap();
+        tool.links.repo = repo.map(String::from);
+        tool.links.homepage = homepage.map(String::from);
+        tool
+    }
+
+    #[test]
+    fn tldr_pages_parse_and_match_only_their_own_tool() {
+        let page = parse_tldr_page(
+            "# rg\n\n> Ripgrep.\n> More information: <https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md>.\n\n\
+             - Search for a pattern:\n\n`rg {{pattern}}`\n\n- Search a path:\n\n`rg {{pattern}} {{path}}`\n",
+        );
+        assert_eq!(
+            page.examples,
+            vec![
+                Example {
+                    description: "Search for a pattern".into(),
+                    command: "rg {{pattern}}".into()
+                },
+                Example {
+                    description: "Search a path".into(),
+                    command: "rg {{pattern}} {{path}}".into()
+                },
+            ]
+        );
+        let info = page.more_information.as_deref();
+        let ripgrep = tool_with_links(
+            "ripgrep",
+            Some("https://github.com/BurntSushi/ripgrep"),
+            None,
+        );
+        let other = tool_with_links("rg", Some("https://github.com/someone/rg"), None);
+        assert!(tldr_page_matches(&ripgrep, info));
+        assert!(!tldr_page_matches(&other, info));
+        let site = tool_with_links("task", None, Some("https://taskfile.dev/"));
+        assert!(tldr_page_matches(&site, Some("https://taskfile.dev/usage")));
+        assert!(!tldr_page_matches(
+            &site,
+            Some("https://taskwarrior.org/docs")
+        ));
+        assert!(!tldr_page_matches(&site, None));
+    }
+
+    #[test]
+    fn repology_installs_require_the_same_homebrew_formula() {
+        let packages: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"repo": "homebrew", "srcname": "ripgrep"},
+                {"repo": "arch", "srcname": "ripgrep", "binname": "ripgrep"},
+                {"repo": "alpine_edge", "srcname": "ripgrep", "binname": "ripgrep-doc"},
+                {"repo": "alpine_edge", "srcname": "ripgrep", "binname": "ripgrep"},
+                {"repo": "scoop", "binname": "ripgrep"},
+                {"repo": "debian_unstable", "srcname": "rust-ripgrep"}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            repology_installs("ripgrep", Some("rg"), &packages).unwrap(),
+            vec![
+                ("pacman".into(), "pacman -S ripgrep".into()),
+                ("apk".into(), "apk add ripgrep".into()),
+                ("scoop".into(), "scoop install ripgrep".into()),
+            ]
+        );
+        assert!(repology_installs("other", None, &packages).is_none());
+        let mut cask = tool_with_links("obsidian", None, None);
+        cask.install
+            .insert("brew".into(), "brew install --cask obsidian".into());
+        assert_eq!(homebrew_formula(&cask), None);
+    }
+
     #[test]
     fn add_manual_tools_includes_required_terraform_metadata() {
         let mut tools = Vec::new();
@@ -2600,6 +2927,8 @@ mod tests {
             links: Links::default(),
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         }];
 
         add_manual_tools(&mut tools);
