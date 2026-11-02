@@ -86,6 +86,62 @@ tools:
             "{args:?} must be a usage error"
         );
     }
+    // Keys keep the requested order after score, and missing fields are omitted.
+    let raw = run(&["jq", "--json", "--score", "--fields", "stars,install,name"]).stdout;
+    let raw = String::from_utf8(raw).unwrap();
+    let positions: Vec<_> = ["\"score\"", "\"stars\"", "\"name\""]
+        .iter()
+        .map(|key| raw.find(key).unwrap())
+        .collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{raw}");
+    let projected: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(projected[0].as_object().unwrap().len(), 3, "{raw}");
+    let info = run(&["info", "jq", "--yaml", "--fields", "name,stars"]);
+    assert_eq!(
+        String::from_utf8(info.stdout).unwrap(),
+        "name: jq\nstars: 100\n"
+    );
+    let batch = run(&["batch", "jq", "--json", "--fields", "name"]);
+    let batch: serde_json::Value = serde_json::from_slice(&batch.stdout).unwrap();
+    assert_eq!(
+        batch,
+        serde_json::json!([{"query": "jq", "results": [{"name": "jq"}]}])
+    );
+    assert_eq!(run(&["jq", "--fields", "nope"]).status.code(), Some(2));
+
+    let missing = run(&["info", "qzxjkvblorp", "--json"]);
+    assert_eq!(missing.status.code(), Some(4));
+    let error: serde_json::Value = serde_json::from_str(
+        String::from_utf8(missing.stderr)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(error["error"]["code"], "not_found");
+    assert_eq!(error["error"]["exit_code"], 4);
+    assert_eq!(
+        run(&["compare", "qzxjkvblorp", "--json"]).status.code(),
+        Some(4)
+    );
+    let no_index = Command::new(env!("CARGO_BIN_EXE_clidex"))
+        .env("CLIDEX_INDEX_PATH", path.with_extension("missing.yaml"))
+        .args(["stats", "--json"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(no_index.status.code(), Some(3));
+    let error: serde_json::Value = serde_json::from_str(
+        String::from_utf8(no_index.stderr)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(error["error"]["code"], "index_unavailable");
+
     let since = run(&["trending", "--updated-since", "2026-01-01", "--json"]);
     assert!(since.status.success(), "{:?}", since.stderr);
     let stale = String::from_utf8(run(&["stats", "--json"]).stderr).unwrap();
@@ -100,6 +156,6 @@ tools:
     std::fs::write(&path, "version: 1\ngenerated: test\ntools: []\n").unwrap();
     assert!(!run(&["jq", "--json"]).status.success());
     std::fs::write(&path, "not valid: [").unwrap();
-    assert!(!run(&["stats", "--json"]).status.success());
+    assert_eq!(run(&["stats", "--json"]).status.code(), Some(3));
     std::fs::remove_file(path).unwrap();
 }

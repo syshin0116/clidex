@@ -32,6 +32,9 @@ struct Cli {
     /// Include relevance scores
     #[arg(long, global = true)]
     score: bool,
+    /// Only output these tool fields in JSON/YAML (comma-separated, e.g. name,install)
+    #[arg(long, global = true, value_delimiter = ',', value_parser = parse_field)]
+    fields: Option<Vec<String>>,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -67,6 +70,98 @@ enum Commands {
         #[arg(long, value_parser = parse_date)]
         updated_since: Option<String>,
     },
+}
+
+fn parse_field(value: &str) -> Result<String, String> {
+    if output::TOOL_FIELDS.contains(&value) {
+        Ok(value.to_owned())
+    } else {
+        Err(format!(
+            "expected one of: {}",
+            output::TOOL_FIELDS.join(", ")
+        ))
+    }
+}
+
+/// Failure classes with distinct exit codes; clap reports usage errors with 2.
+#[derive(Clone, Copy)]
+enum ErrorKind {
+    General,
+    IndexUnavailable,
+    NotFound,
+    UpdateFailed,
+}
+
+impl ErrorKind {
+    fn exit_code(self) -> i32 {
+        match self {
+            ErrorKind::General => 1,
+            ErrorKind::IndexUnavailable => 3,
+            ErrorKind::NotFound => 4,
+            ErrorKind::UpdateFailed => 5,
+        }
+    }
+
+    fn code(self) -> &'static str {
+        match self {
+            ErrorKind::General => "error",
+            ErrorKind::IndexUnavailable => "index_unavailable",
+            ErrorKind::NotFound => "not_found",
+            ErrorKind::UpdateFailed => "update_failed",
+        }
+    }
+}
+
+struct CliError {
+    kind: ErrorKind,
+    message: String,
+}
+
+impl From<String> for CliError {
+    fn from(message: String) -> Self {
+        CliError {
+            kind: ErrorKind::General,
+            message,
+        }
+    }
+}
+
+fn error_as(kind: ErrorKind) -> impl FnOnce(String) -> CliError {
+    move |message| CliError { kind, message }
+}
+
+/// Print the error on stderr in the same format as stdout and exit with its code.
+fn report(error: CliError, format: Format) -> ! {
+    #[derive(serde::Serialize)]
+    struct ErrorBody<'a> {
+        code: &'a str,
+        message: &'a str,
+        exit_code: i32,
+    }
+    #[derive(serde::Serialize)]
+    struct ErrorOutput<'a> {
+        error: ErrorBody<'a>,
+    }
+    let exit_code = error.kind.exit_code();
+    let body = ErrorOutput {
+        error: ErrorBody {
+            code: error.kind.code(),
+            message: &error.message,
+            exit_code,
+        },
+    };
+    match format {
+        Format::Json => eprintln!(
+            "{}",
+            serde_json::to_string(&body).expect("JSON serialization")
+        ),
+        Format::Yaml => eprint!(
+            "{}",
+            serde_norway::to_string(&body).expect("YAML serialization")
+        ),
+        Format::Pretty => eprintln!("Error: {}", error.message),
+    }
+    std::process::exit(exit_code);
 }
 
 fn parse_max_results(value: &str) -> Result<usize, String> {
@@ -116,7 +211,13 @@ fn get_format(pretty: bool, json: bool, yaml: bool) -> Format {
 
 /// Load index, auto-downloading on first run if interactive TTY.
 /// Non-interactive (pipes, CI) gets an error with instructions instead.
-async fn load_or_download() -> Result<clidex::model::Index, String> {
+async fn load_or_download() -> Result<clidex::model::Index, CliError> {
+    load_or_download_inner()
+        .await
+        .map_err(error_as(ErrorKind::IndexUnavailable))
+}
+
+async fn load_or_download_inner() -> Result<clidex::model::Index, String> {
     let path = config::index_path()?;
     match index::load_index() {
         Ok(index) => {
@@ -206,24 +307,33 @@ fn do_search(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    if let Err(error) = run().await {
-        eprintln!("Error: {error}");
-        std::process::exit(1);
+    let cli = Cli::parse();
+    let format = get_format(cli.pretty, cli.json, cli.yaml);
+    if let Err(error) = run(cli, format).await {
+        report(error, format);
     }
 }
 
-async fn run() -> Result<(), String> {
-    let cli = Cli::parse();
+async fn run(cli: Cli, format: Format) -> Result<(), CliError> {
     if cli.command.is_some() && (cli.query.is_some() || cli.categories) {
-        return Err("Use either a query or a subcommand".into());
+        use clap::CommandFactory;
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "use either a query or a subcommand",
+            )
+            .exit();
     }
-    let format = get_format(cli.pretty, cli.json, cli.yaml);
+    let fields = cli.fields.as_deref();
     let max_results = cli.max_results.unwrap_or(config::DEFAULT_MAX_RESULTS);
     let command = cli
         .command
         .or_else(|| cli.query.map(|query| Commands::Search { query }));
     match command {
-        Some(Commands::Update) => match index::update_index().await? {
+        Some(Commands::Update) => match index::update_index()
+            .await
+            .map_err(error_as(ErrorKind::UpdateFailed))?
+        {
             index::UpdateOutcome::Updated(count) => eprintln!("Index updated: {count} tools"),
             index::UpdateOutcome::AlreadyCurrent(count) => {
                 eprintln!("Index already up to date: {count} tools")
@@ -299,9 +409,9 @@ async fn run() -> Result<(), String> {
                 })
                 .collect();
             if batch {
-                output::print_batch_results(&results, format, cli.score);
+                output::print_batch_results(&results, format, cli.score, fields);
             } else {
-                output::print_search_results(&results[0].1, format, cli.score);
+                output::print_search_results(&results[0].1, format, cli.score, fields);
             }
         }
         Some(Commands::Info { name }) => {
@@ -318,9 +428,12 @@ async fn run() -> Result<(), String> {
                             .join(", ")
                     );
                 }
-                format!("Tool not found: {name}")
+                CliError {
+                    kind: ErrorKind::NotFound,
+                    message: format!("Tool not found: {name}"),
+                }
             })?;
-            output::print_tool_detail(&tool, format);
+            output::print_tool_detail(&tool, format, fields);
         }
         Some(Commands::Compare { names }) => {
             let idx = load_or_download().await?;
@@ -349,9 +462,12 @@ async fn run() -> Result<(), String> {
                         );
                     }
                 }
-                return Err("No matching tools found".into());
+                return Err(CliError {
+                    kind: ErrorKind::NotFound,
+                    message: "No matching tools found".into(),
+                });
             }
-            output::print_compare(&tools, format);
+            output::print_compare(&tools, format, fields);
         }
         Some(Commands::Trending { updated_since }) => {
             let idx = load_or_download().await?;
@@ -371,7 +487,7 @@ async fn run() -> Result<(), String> {
             if tools.is_empty() {
                 eprintln!("No trending tools found");
             }
-            output::print_tools(&tools, format);
+            output::print_tools(&tools, format, fields);
         }
         Some(Commands::Stats) => {
             let stats = index::index_stats(&load_or_download().await?);
@@ -403,7 +519,7 @@ async fn run() -> Result<(), String> {
             if tools.is_empty() {
                 suggest_category(category, &idx.tools);
             }
-            output::print_tools(&tools, format);
+            output::print_tools(&tools, format, fields);
         }
         _ => {
             use clap::CommandFactory;

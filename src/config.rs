@@ -16,6 +16,10 @@ pub fn index_path() -> Result<PathBuf, String> {
 pub const INDEX_URL: &str =
     "https://github.com/syshin0116/clidex/releases/download/index/index.yaml";
 
+pub const INDEX_ZST_URL: &str =
+    "https://github.com/syshin0116/clidex/releases/download/index/index.yaml.zst";
+
+/// SHA-256 of the uncompressed `index.yaml`, shared by both download formats.
 pub const INDEX_SHA256_URL: &str =
     "https://github.com/syshin0116/clidex/releases/download/index/index.yaml.sha256";
 

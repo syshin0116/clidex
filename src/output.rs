@@ -34,45 +34,102 @@ struct SearchResultOutput<'a> {
     tool: &'a Tool,
 }
 
+/// Version of the JSON/YAML output contract, reported by `stats`.
+pub const SCHEMA_VERSION: u32 = 1;
+
+/// Tool fields accepted by `--fields`, in index order.
+pub const TOOL_FIELDS: &[&str] = &[
+    "name",
+    "binary",
+    "desc",
+    "category",
+    "tags",
+    "install",
+    "stars",
+    "brew_installs_365d",
+    "links",
+    "last_updated",
+    "github_fetched_at",
+];
+
+/// A JSON object that serializes its keys in insertion order.
+struct OrderedObject(Vec<(String, serde_json::Value)>);
+
+impl serde::Serialize for OrderedObject {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, value) in &self.0 {
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+/// Keep `score` and the requested fields of one serialized tool, in the requested order.
+fn project_tool(tool: serde_json::Value, fields: &[String]) -> OrderedObject {
+    let serde_json::Value::Object(mut object) = tool else {
+        return OrderedObject(Vec::new());
+    };
+    let mut kept = Vec::new();
+    for key in std::iter::once("score").chain(fields.iter().map(String::as_str)) {
+        if let Some(value) = object.remove(key) {
+            kept.push((key.to_owned(), value));
+        }
+    }
+    OrderedObject(kept)
+}
+
+fn write_structured<T: serde::Serialize + ?Sized>(value: &T, format: Format) {
+    match format {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(value).expect("JSON serialization")
+        ),
+        _ => print!(
+            "{}",
+            serde_norway::to_string(value).expect("YAML serialization")
+        ),
+    }
+}
+
+/// Print one tool or a list of tools as JSON/YAML, keeping only `fields` when given.
+fn emit_tools<T: serde::Serialize>(items: &[T], format: Format, fields: Option<&[String]>) {
+    match fields {
+        None => write_structured(items, format),
+        Some(fields) => {
+            let projected: Vec<OrderedObject> = items
+                .iter()
+                .map(|item| {
+                    project_tool(
+                        serde_json::to_value(item).expect("JSON serialization"),
+                        fields,
+                    )
+                })
+                .collect();
+            write_structured(&projected, format);
+        }
+    }
+}
+
 /// Print search results. With --score, output uses `{score, ...tool}` wrapper.
 /// Without --score, output is plain `[Tool]` (same schema as info/compare/trending).
-pub fn print_search_results(results: &[SearchResult], format: Format, show_score: bool) {
+pub fn print_search_results(
+    results: &[SearchResult],
+    format: Format,
+    show_score: bool,
+    fields: Option<&[String]>,
+) {
     match format {
-        Format::Yaml => {
-            if show_score {
-                let items: Vec<SearchResultOutput> = results
-                    .iter()
-                    .map(|r| SearchResultOutput {
-                        score: Some(r.score),
-                        tool: &r.tool,
-                    })
-                    .collect();
-                let yaml = serde_norway::to_string(&items).expect("Failed to serialize to YAML");
-                print!("{yaml}");
-            } else {
-                let tools: Vec<&Tool> = results.iter().map(|r| &r.tool).collect();
-                let yaml = serde_norway::to_string(&tools).expect("Failed to serialize to YAML");
-                print!("{yaml}");
-            }
-        }
-        Format::Json => {
-            if show_score {
-                let items: Vec<SearchResultOutput> = results
-                    .iter()
-                    .map(|r| SearchResultOutput {
-                        score: Some(r.score),
-                        tool: &r.tool,
-                    })
-                    .collect();
-                let json =
-                    serde_json::to_string_pretty(&items).expect("Failed to serialize to JSON");
-                println!("{json}");
-            } else {
-                let tools: Vec<&Tool> = results.iter().map(|r| &r.tool).collect();
-                let json =
-                    serde_json::to_string_pretty(&tools).expect("Failed to serialize to JSON");
-                println!("{json}");
-            }
+        Format::Yaml | Format::Json => {
+            let items: Vec<SearchResultOutput> = results
+                .iter()
+                .map(|r| SearchResultOutput {
+                    score: show_score.then_some(r.score),
+                    tool: &r.tool,
+                })
+                .collect();
+            emit_tools(&items, format, fields);
         }
         Format::Pretty => {
             let width = term_width();
@@ -90,53 +147,64 @@ pub fn print_batch_results(
     results: &[(String, Vec<SearchResult>)],
     format: Format,
     show_score: bool,
+    fields: Option<&[String]>,
 ) {
     #[derive(serde::Serialize)]
-    struct QueryResults<'a> {
+    struct QueryResults<'a, T> {
         query: &'a str,
-        results: Vec<SearchResultOutput<'a>>,
+        results: Vec<T>,
     }
-    let items: Vec<_> = results
-        .iter()
-        .map(|(query, results)| QueryResults {
-            query,
-            results: results
+    if format == Format::Pretty {
+        for (query, results) in results {
+            println!("{}", query.bold());
+            print_search_results(results, format, show_score, None);
+        }
+        return;
+    }
+    fn scored(results: &[SearchResult], show_score: bool) -> Vec<SearchResultOutput<'_>> {
+        results
+            .iter()
+            .map(|result| SearchResultOutput {
+                score: show_score.then_some(result.score),
+                tool: &result.tool,
+            })
+            .collect()
+    }
+    match fields {
+        None => {
+            let items: Vec<_> = results
                 .iter()
-                .map(|result| SearchResultOutput {
-                    score: show_score.then_some(result.score),
-                    tool: &result.tool,
+                .map(|(query, results)| QueryResults {
+                    query,
+                    results: scored(results, show_score),
                 })
-                .collect(),
-        })
-        .collect();
-    match format {
-        Format::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(&items).expect("JSON serialization")
-        ),
-        Format::Yaml => print!(
-            "{}",
-            serde_norway::to_string(&items).expect("YAML serialization")
-        ),
-        Format::Pretty => {
-            for (query, results) in results {
-                println!("{}", query.bold());
-                print_search_results(results, format, show_score);
-            }
+                .collect();
+            write_structured(&items, format);
+        }
+        Some(fields) => {
+            let items: Vec<_> = results
+                .iter()
+                .map(|(query, results)| QueryResults {
+                    query,
+                    results: scored(results, show_score)
+                        .iter()
+                        .map(|item| {
+                            project_tool(
+                                serde_json::to_value(item).expect("JSON serialization"),
+                                fields,
+                            )
+                        })
+                        .collect(),
+                })
+                .collect();
+            write_structured(&items, format);
         }
     }
 }
 
 pub fn print_stats(stats: &crate::index::IndexStats, format: Format) {
     match format {
-        Format::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(stats).expect("JSON serialization")
-        ),
-        Format::Yaml => print!(
-            "{}",
-            serde_norway::to_string(stats).expect("YAML serialization")
-        ),
+        Format::Yaml | Format::Json => write_structured(stats, format),
         Format::Pretty => {
             println!("Index version: {}", stats.version);
             println!("Generated:     {}", stats.generated);
@@ -191,16 +259,9 @@ fn print_search_result_pretty(result: &SearchResult, show_score: bool, width: us
     }
 }
 
-pub fn print_tools(tools: &[Tool], format: Format) {
+pub fn print_tools(tools: &[Tool], format: Format, fields: Option<&[String]>) {
     match format {
-        Format::Yaml => {
-            let yaml = serde_norway::to_string(tools).expect("Failed to serialize to YAML");
-            print!("{yaml}");
-        }
-        Format::Json => {
-            let json = serde_json::to_string_pretty(tools).expect("Failed to serialize to JSON");
-            println!("{json}");
-        }
+        Format::Yaml | Format::Json => emit_tools(tools, format, fields),
         Format::Pretty => {
             let width = term_width();
             for (i, tool) in tools.iter().enumerate() {
@@ -213,16 +274,18 @@ pub fn print_tools(tools: &[Tool], format: Format) {
     }
 }
 
-pub fn print_tool_detail(tool: &Tool, format: Format) {
+pub fn print_tool_detail(tool: &Tool, format: Format, fields: Option<&[String]>) {
     match format {
-        Format::Yaml => {
-            let yaml = serde_norway::to_string(tool).expect("Failed to serialize to YAML");
-            print!("{yaml}");
-        }
-        Format::Json => {
-            let json = serde_json::to_string_pretty(tool).expect("Failed to serialize to JSON");
-            println!("{json}");
-        }
+        Format::Yaml | Format::Json => match fields {
+            None => write_structured(tool, format),
+            Some(fields) => write_structured(
+                &project_tool(
+                    serde_json::to_value(tool).expect("JSON serialization"),
+                    fields,
+                ),
+                format,
+            ),
+        },
         Format::Pretty => {
             print_tool_detail_pretty(tool);
         }
@@ -231,21 +294,12 @@ pub fn print_tool_detail(tool: &Tool, format: Format) {
 
 pub fn print_categories(cats: &[(String, usize)], format: Format) {
     match format {
-        Format::Yaml => {
+        Format::Yaml | Format::Json => {
             let map: Vec<serde_json::Value> = cats
                 .iter()
                 .map(|(name, count)| serde_json::json!({ "name": name, "count": count }))
                 .collect();
-            let yaml = serde_norway::to_string(&map).expect("Failed to serialize to YAML");
-            print!("{yaml}");
-        }
-        Format::Json => {
-            let map: Vec<serde_json::Value> = cats
-                .iter()
-                .map(|(name, count)| serde_json::json!({ "name": name, "count": count }))
-                .collect();
-            let json = serde_json::to_string_pretty(&map).expect("Failed to serialize to JSON");
-            println!("{json}");
+            write_structured(&map, format);
         }
         Format::Pretty => {
             for (name, count) in cats {
@@ -259,9 +313,9 @@ pub fn print_categories(cats: &[(String, usize)], format: Format) {
     }
 }
 
-pub fn print_compare(tools: &[Tool], format: Format) {
+pub fn print_compare(tools: &[Tool], format: Format, fields: Option<&[String]>) {
     match format {
-        Format::Yaml | Format::Json => print_tools(tools, format),
+        Format::Yaml | Format::Json => print_tools(tools, format, fields),
         Format::Pretty => print_compare_pretty(tools),
     }
 }

@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Structured stats output and semantic embedding downloads for semantic builds.
 - `clidex update` sends `If-None-Match` and skips the download when the index is unchanged.
 - Warn on stderr when the index is more than 14 days old; set `CLIDEX_NO_STALE_WARNING` to silence it.
+- `--fields name,install,...` limits JSON/YAML tool output to the listed fields.
+- Distinct exit codes (3 index unavailable, 4 tool not found, 5 update failed) and a structured error object on stderr in JSON/YAML mode. See the output contract in `docs/agent-integration.md`.
+- `stats` reports the output `schema_version`.
+- `clidex update` downloads the zstd-compressed index (about 330 KB instead of 2 MB) and falls back to plain YAML.
 
 ## [0.4.0] - 2026-04-07
 
