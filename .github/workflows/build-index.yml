@@ -65,7 +65,8 @@ jobs:
       - name: Update tool count in README and docs
         run: |
           COUNT=$(grep -c '^- name:' index.yaml)
-          FORMATTED=$(python3 -c "print(f'{int('"$COUNT"'):,}')")
+          # Round down to the hundred so the "N+" claim stays true without a commit every day.
+          FORMATTED=$(python3 -c "print(f'{int('"$COUNT"') // 100 * 100:,}')")
           sed -i -E "s/[0-9,]+\+ command-line tools/${FORMATTED}+ command-line tools/g" README.md docs/index.html
           sed -i -E "s/[0-9,]+\+ tool index/${FORMATTED}+ tool index/g" README.md
           echo "FORMATTED=${FORMATTED}" >> "$GITHUB_ENV"
