@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
 ### Security
 
 - Update rustls, rustls-webpki, quinn-proto, and webpki roots to clear RUSTSEC-2026-0285, -0338 to -0342, -0346, -0348, -0349, and -0381 to -0383.
@@ -154,6 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - install.sh for Linux/macOS
 - MIT license
 
+[Unreleased]: https://github.com/syshin0116/clidex/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/syshin0116/clidex/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/syshin0116/clidex/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/syshin0116/clidex/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/syshin0116/clidex/compare/v0.1.0...v0.2.0
