@@ -844,6 +844,8 @@ mod tests {
             links: Links::default(),
             last_updated: None,
             github_fetched_at: None,
+            examples: Vec::new(),
+            repology_fetched_at: None,
         }
     }
 

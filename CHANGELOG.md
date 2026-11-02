@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Distinct exit codes (3 index unavailable, 4 tool not found, 5 update failed) and a structured error object on stderr in JSON/YAML mode. See the output contract in `docs/agent-integration.md`.
 - `stats` reports the output `schema_version`.
 - `clidex update` downloads the zstd-compressed index (about 330 KB instead of 2 MB) and falls back to plain YAML.
+- Tools carry up to three usage `examples` from tldr-pages when the page links to the tool's own repository or homepage.
+- `pacman`, `apk`, and `scoop` install commands from Repology for Homebrew formulae whose Repology project contains the same formula.
 - `clidex mcp` serves `search_tools`, `tool_info`, `compare_tools`, `trending_tools`, and `list_categories` to MCP clients over stdio, with output schemas and structured results. It downloads a missing index on startup.
 
 ### Changed
