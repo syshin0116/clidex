@@ -40,6 +40,8 @@ terminal_size = "0.4.4"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 sha2 = "0.11.0"
 ruzstd = "0.9.1"
+rmcp = { version = "3.8.0", features = ["server", "transport-io", "macros"] }
+schemars = "1.2.3"
 
 [dev-dependencies]
 

@@ -737,6 +737,64 @@ pub fn filter_by_category(tools: &[Tool], category: &str) -> Vec<Tool> {
     filtered
 }
 
+/// Accept only `YYYY-MM-DD`, which compares correctly with index dates as a string.
+pub fn parse_date(value: &str) -> Result<String, String> {
+    let bytes = value.as_bytes();
+    let well_formed = bytes.len() == 10
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(position, byte)| match position {
+                4 | 7 => *byte == b'-',
+                _ => byte.is_ascii_digit(),
+            });
+    let month = value.get(5..7).and_then(|month| month.parse::<u8>().ok());
+    let day = value.get(8..10).and_then(|day| day.parse::<u8>().ok());
+    if well_formed
+        && month.is_some_and(|month| (1..=12).contains(&month))
+        && day.is_some_and(|day| (1..=31).contains(&day))
+    {
+        Ok(value.to_owned())
+    } else {
+        Err("expected a date in YYYY-MM-DD format".into())
+    }
+}
+
+/// Tools with GitHub stars, most starred first, optionally limited to a category
+/// and to tools updated on or after `updated_since` (`YYYY-MM-DD`).
+pub fn trending(
+    tools: &[Tool],
+    category: Option<&str>,
+    updated_since: Option<&str>,
+    max_results: usize,
+) -> Vec<Tool> {
+    let mut tools: Vec<Tool> = tools
+        .iter()
+        .filter(|tool| category.is_none_or(|category| matches_category(tool, category)))
+        .filter(|tool| {
+            tool.stars.is_some()
+                && updated_since.is_none_or(|since| {
+                    tool.last_updated
+                        .as_deref()
+                        .is_some_and(|date| date >= since)
+                })
+        })
+        .cloned()
+        .collect();
+    tools.sort_by_key(|tool| std::cmp::Reverse(tool.stars.unwrap_or(0)));
+    tools.truncate(max_results);
+    tools
+}
+
+/// Categories whose name contains `filter` or any of its words, case-insensitively.
+pub fn filter_categories(categories: &mut Vec<(String, usize)>, filter: &str) {
+    let filter = filter.to_lowercase();
+    categories.retain(|(name, _)| {
+        let name = name.to_lowercase();
+        name.contains(&filter) || filter.split_whitespace().any(|word| name.contains(word))
+    });
+}
+
 pub fn get_categories(tools: &[Tool]) -> Vec<(String, usize)> {
     let mut map = std::collections::BTreeMap::new();
     for tool in tools {
